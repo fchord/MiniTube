@@ -1,6 +1,6 @@
 # MiniTube on this k8s 集群
 
-三节点 homelab：共享盘用 worker2 上的 **内核 NFS**（`/data/minitube`），应用仍走本地目录。转码 worker 按硬编瀑布抢任务。
+三节点 homelab：共享盘用 worker2 上的 **内核 NFS**（`/data/minitube`），应用仍走本地目录。转码 worker 按硬编瀑布抢任务。完整步骤、前提、日常更新与 DoD 见仓库 **[docs/deploy.md](../../docs/deploy.md)**。
 
 | Rank | Deployment | 节点 | 编码器 |
 | --- | --- | --- | --- |
@@ -17,19 +17,19 @@ NVIDIA 用户态与内核模块必须同版本。worker2 开了 `unattended-upgr
 
 ## 一次切到集群
 
-仓库根目录：
-
 ```bash
 chmod +x k8s/minitube/cutover.sh k8s/minitube/build-images.sh
 ./k8s/minitube/cutover.sh
 ```
 
-脚本会：导出 worker2 NFS → 建 PVC → 把 compose 里的 Postgres 迁进 StatefulSet → rsync `api/data` → 编镜像并 ctr import → 停本机 8080/1935 → 拉起 API / SRS / GPU worker。Cloudflare 隧道继续打 `192.168.43.111:8080`（API `hostPort: 8080`）。电信码流边缘 TLS 监听 `192.168.43.111:18080`（`hostPort: 18080`），见 [`docs/media-edges.md`](../../docs/media-edges.md)。直播推流 `rtmp://192.168.43.111:1935/live`。
+脚本行为见 [docs/deploy.md](../../docs/deploy.md)「第一次切到集群」。Cloudflare 隧道打 `192.168.43.111:8080`。电信码流边缘 `192.168.43.111:18080`，见 [media-edges.md](../../docs/media-edges.md)。推流 `rtmp://192.168.43.111:1935/live`。
 
-## 只更新镜像
+## 只更新 API 镜像
+
+不要只 `rollout restart`。先把新镜像 import 进 master 的 containerd，并处理 hostPort 死锁：
 
 ```bash
-./k8s/minitube/build-images.sh
-kubectl -n minitube rollout restart deploy/minitube-api
-kubectl -n minitube rollout restart deploy -l app=minitube-worker
+./k8s/minitube/deploy-api.sh
 ```
+
+同时更新 worker 才跑 `./k8s/minitube/build-images.sh`，再 `kubectl -n minitube rollout restart deploy -l app=minitube-worker`。

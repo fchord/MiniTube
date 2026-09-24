@@ -16,7 +16,7 @@ make run      # API :8080
 make worker   # 另开一个终端，FFmpeg 转码
 ```
 
-进现有 k8s（含 GPU 硬编）见 [k8s/minitube/README.md](k8s/minitube/README.md)，一条命令：`./k8s/minitube/cutover.sh`。
+进现有 k8s（含 GPU 硬编）见 [docs/deploy.md](docs/deploy.md) 与 [k8s/minitube/README.md](k8s/minitube/README.md)。第一次：`./k8s/minitube/cutover.sh`。日常只更 API：`./k8s/minitube/deploy-api.sh`。贡献与 DoD：[CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 仓库布局
 
