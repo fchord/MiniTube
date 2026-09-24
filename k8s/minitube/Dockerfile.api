@@ -1,0 +1,9 @@
+FROM ubuntu:22.04
+COPY dist/minitube-api /usr/local/bin/minitube-api
+COPY dist/ffmpeg-bundle /opt/ffmpeg
+ENV PATH=/opt/ffmpeg/usr/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/ffmpeg/lib/x86_64-linux-gnu:/opt/ffmpeg/usr/lib/x86_64-linux-gnu:/opt/ffmpeg/usr/lib/x86_64-linux-gnu/pulseaudio
+ENV LIBVA_DRIVERS_PATH=/opt/ffmpeg/usr/lib/x86_64-linux-gnu/dri
+ENV TZ=Asia/Shanghai
+EXPOSE 8080 18080
+ENTRYPOINT ["/usr/local/bin/minitube-api"]

@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>MiniTube</title>
+  <link rel="stylesheet" href="/static/post-media.css"/>
+  <link rel="stylesheet" href="/static/account.css"/>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+    header { padding: 12px 16px; background: #1a1a1a; }
+    header a { color: #8ab4ff; text-decoration: none; }
+    main { max-width: 1440px; margin: 0 auto; padding: 16px; }
+    .card { background: #1a1a1a; padding: 12px 16px; margin: 12px 0; border-radius: 8px; }
+    .meta { color: #aaa; font-size: .85rem; }
+    .err { color: #f88; }
+    .ch-section {
+      --ch-line-gap: 1.8rem;
+      margin-top: 2.4rem;
+      padding-top: var(--ch-line-gap);
+      border-top: 1px solid #3a3a3a;
+    }
+    .ch-section h2 { margin: 0 0 calc(var(--ch-line-gap) * 0.75); }
+    .ch-section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin: 0 0 calc(var(--ch-line-gap) * 0.75);
+    }
+    .ch-section-head h2 { margin: 0; }
+    .ch-toolbar { display: none; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .ch-toolbar.is-on { display: flex; }
+    .btn-group { display: flex; gap: 6px; }
+    .ch-toolbar button, .confirm-btns button {
+      background: #2a2a2a; color: #eee; border: 1px solid #444; padding: 6px 12px;
+      border-radius: 8px; cursor: pointer; font-size: .875rem;
+    }
+    .ch-toolbar button:hover, .confirm-btns button:hover { background: #333; }
+    .media-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      column-gap: 16px;
+      row-gap: 28px;
+      margin: 0;
+    }
+    .media-grid.shorts-grid {
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    }
+    .trash-grid { margin-bottom: 28px; }
+    .trash-grid:last-child { margin-bottom: 0; }
+    .media-card {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 100%;
+      min-width: 0;
+      text-decoration: none;
+      color: #eee;
+    }
+    .media-card .thumb-wrap {
+      position: relative;
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+    }
+    .media-card.short .thumb-wrap { aspect-ratio: 9 / 16; }
+    .media-card .thumb-link {
+      position: absolute;
+      inset: 0;
+      display: block;
+    }
+    .media-card .thumb, .media-card .thumb-empty {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #000;
+      border-radius: 6px;
+      display: block;
+    }
+    .vis-private, .vis-eye {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: rgba(0,0,0,.55);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      padding: 0;
+    }
+    .vis-eye { cursor: pointer; z-index: 2; }
+    .vis-private svg, .vis-eye svg { width: 14px; height: 14px; display: block; }
+    .media-pick {
+      position: absolute;
+      top: 6px;
+      left: 6px;
+      z-index: 2;
+      width: 22px;
+      height: 22px;
+      border-radius: 4px;
+      background: rgba(0,0,0,.55);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .media-pick input { width: 14px; height: 14px; margin: 0; cursor: pointer; }
+    .thumb-dur {
+      position: absolute;
+      right: 3px;
+      bottom: 3px;
+      z-index: 2;
+      pointer-events: none;
+      color: #fff;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-size: 12px;
+      line-height: 1.2;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.02em;
+    }
+    .media-title {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      word-break: break-word;
+    }
+    .media-title, .post-body {
+      font-family: inherit;
+      font-size: .875rem;
+      line-height: 1.3;
+      text-decoration: none;
+      color: inherit;
+      font-weight: 400;
+    }
+    .media-sub {
+      font-size: .75rem;
+      line-height: 1.3;
+      color: #aaa;
+    }
+    .post-card-link .media-sub { display: block; margin-top: 6px; }
+    #posts { max-width: 48%; margin-left: auto; margin-right: auto; }
+    .post-card {
+      background: #1a1a1a;
+      padding: 12px 16px;
+      margin: 12px 0;
+      border-radius: 8px;
+    }
+    .post-card-link {
+      display: block;
+      color: #eee;
+      text-decoration: none;
+    }
+    .post-card-link .post-imgs { margin: 0 0 10px; }
+    .post-body { display: block; }
+    .ch-head { display: flex; align-items: center; gap: 12px; }
+    .ch-actions { display: none; align-items: center; gap: 8px; flex: 0 0 auto; }
+    .ch-actions.is-on { display: flex; }
+    .ch-actions button {
+      background: #2a2a2a; color: #eee; border: 1px solid #444; padding: 6px 12px;
+      border-radius: 8px; cursor: pointer; font-size: .875rem;
+    }
+    .ch-publish { position: relative; }
+    .ch-publish-menu {
+      position: absolute; right: 0; top: 100%; margin-top: 4px; min-width: 140px;
+      background: #222; border: 1px solid #444; border-radius: 8px; padding: 4px 0; z-index: 8;
+    }
+    .ch-publish-menu a, .ch-publish-menu button {
+      display: block; width: 100%; box-sizing: border-box; text-align: left;
+      background: none; border: 0; color: #eee; padding: 8px 12px; text-decoration: none;
+      font-size: .875rem; cursor: pointer;
+    }
+    .ch-publish-menu a:hover, .ch-publish-menu button:hover { background: #333; }
+    .ch-publish-menu button:disabled { color: #888; cursor: not-allowed; }
+    .ch-avatar {
+      flex: 0 0 2.7rem;
+      width: 2.7rem;
+      height: 2.7rem;
+      border-radius: 50%;
+      overflow: hidden;
+      background: #2a4a7a;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+    .ch-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ch-head-text { min-width: 0; flex: 1; }
+    .ch-head h1 { font-size: 1.3rem; margin: 0; line-height: 1.3; }
+    .ch-head .meta { margin: .2em 0 0; }
+    #confirmDlg {
+      background: #222;
+      color: #eee;
+      border: 1px solid #444;
+      border-radius: 10px;
+      padding: 16px 18px;
+      max-width: 420px;
+      width: calc(100% - 32px);
+    }
+    #confirmDlg::backdrop { background: rgba(0,0,0,.55); }
+    #confirmDlg h3 { margin: 0 0 8px; font-size: 1rem; font-weight: 600; }
+    #confirmList { margin: 8px 0; padding-left: 1.2em; max-height: 240px; overflow: auto; }
+    #confirmList li { margin: 4px 0; word-break: break-word; }
+    .confirm-hint { color: #aaa; font-size: .85rem; margin: 8px 0 14px; }
+    .confirm-btns { display: flex; justify-content: flex-end; gap: 8px; }
+  </style>
+</head>
+<body>
+  <header><a href="/">MiniTube</a> · <a href="/live">直播</a> · <a href="/shorts">短视频</a> · <a href="/compose">发帖</a> · <a href="/feed">时间线</a></header>
+  <main>
+    <div class="ch-head">
+      <div class="ch-avatar" id="avatar"></div>
+      <div class="ch-head-text">
+        <h1 id="title">加载中…</h1>
+        <p class="meta" id="meta"></p>
+      </div>
+      <div class="ch-actions" id="ownerActions">
+        <div class="ch-publish">
+          <button type="button" id="publishBtn">发布</button>
+          <div class="ch-publish-menu" id="publishMenu" hidden>
+            <a id="pubLong" href="#">视频</a>
+            <a id="pubShort" href="#">短视频</a>
+            <button type="button" disabled>直播（即将推出）</button>
+          </div>
+        </div>
+        <button type="button" id="manageBtn">管理频道</button>
+      </div>
+    </div>
+    <section class="ch-section" data-scope="videos">
+      <div class="ch-section-head">
+        <h2>视频</h2>
+        <div class="ch-toolbar" data-kind="media">
+          <div class="btn-group">
+            <button type="button" data-act="select-all">全选</button>
+            <button type="button" data-act="invert">反选</button>
+          </div>
+          <div class="btn-group">
+            <button type="button" data-act="hide">隐藏</button>
+            <button type="button" data-act="publish">公开</button>
+            <button type="button" data-act="recycle">删除</button>
+          </div>
+        </div>
+      </div>
+      <div id="videos" class="meta">加载中…</div>
+    </section>
+    <section class="ch-section" data-scope="shorts">
+      <div class="ch-section-head">
+        <h2>短视频</h2>
+        <div class="ch-toolbar" data-kind="media">
+          <div class="btn-group">
+            <button type="button" data-act="select-all">全选</button>
+            <button type="button" data-act="invert">反选</button>
+          </div>
+          <div class="btn-group">
+            <button type="button" data-act="hide">隐藏</button>
+            <button type="button" data-act="publish">公开</button>
+            <button type="button" data-act="recycle">删除</button>
+          </div>
+        </div>
+      </div>
+      <div id="shorts" class="meta">加载中…</div>
+    </section>
+    <section class="ch-section" data-scope="lives">
+      <div class="ch-section-head">
+        <h2>直播</h2>
+        <div class="ch-toolbar" data-kind="media">
+          <div class="btn-group">
+            <button type="button" data-act="select-all">全选</button>
+            <button type="button" data-act="invert">反选</button>
+          </div>
+          <div class="btn-group">
+            <button type="button" data-act="hide">隐藏</button>
+            <button type="button" data-act="publish">公开</button>
+            <button type="button" data-act="recycle">删除</button>
+          </div>
+        </div>
+      </div>
+      <div id="lives" class="meta">加载中…</div>
+    </section>
+    <section class="ch-section">
+      <h2>帖子</h2>
+      <div id="posts" class="meta">加载中…</div>
+    </section>
+    <section class="ch-section" id="trashSection" hidden>
+      <div class="ch-section-head">
+        <h2>回收站</h2>
+        <div class="ch-toolbar is-on" data-kind="trash">
+          <div class="btn-group">
+            <button type="button" data-act="restore">恢复</button>
+            <button type="button" data-act="purge">彻底删除</button>
+          </div>
+        </div>
+      </div>
+      <p id="trashEmpty" class="meta" hidden>暂无</p>
+      <div id="trashVideos"></div>
+      <div id="trashShorts"></div>
+      <div id="trashLives"></div>
+    </section>
+    <p class="err" id="err"></p>
+  </main>
+  <dialog id="confirmDlg">
+    <h3 id="confirmLead"></h3>
+    <ul id="confirmList"></ul>
+    <p class="confirm-hint" id="confirmHint"></p>
+    <div class="confirm-btns">
+      <button type="button" id="confirmCancel">取消</button>
+      <button type="button" id="confirmOk">确定</button>
+    </div>
+  </dialog>
+  <script src="/static/post-media.js"></script>
+  <script>
+    const SLOT = "__SLOT__";
+    const MANAGE = __MANAGE__;
+    const API = location.origin;
+    const EYE_OPEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const EYE_CLOSED = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/></svg>';
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    }
+    function fillAvatar(ch) {
+      const el = document.getElementById("avatar");
+      el.textContent = "";
+      if (ch.avatarUrl) {
+        const img = document.createElement("img");
+        img.alt = "";
+        img.src = ch.avatarUrl;
+        el.appendChild(img);
+        return;
+      }
+      const name = String(ch.name || ch.handle || "?").trim();
+      el.textContent = name ? [...name][0] : "?";
+    }
+    function fillBox(id, html, extraClass) {
+      const el = document.getElementById(id);
+      el.className = extraClass || "";
+      el.innerHTML = html || '<p class="meta">暂无</p>';
+      startLiveDurTick();
+      // #region agent log
+      if (id === "shorts" || id === "videos") {
+        const report = (phase) => {
+          const cards = Array.from(el.querySelectorAll(".media-card")).map(c => {
+            const wrap = c.querySelector(".thumb-wrap");
+            const img = c.querySelector("img.thumb");
+            const r = wrap ? wrap.getBoundingClientRect() : null;
+            return {
+              title: (c.querySelector(".media-title") || {}).textContent || "",
+              wrapW: r ? Math.round(r.width) : 0,
+              wrapH: r ? Math.round(r.height) : 0,
+              imgComplete: !!(img && img.complete),
+              naturalW: img ? img.naturalWidth : 0,
+              imgErr: !!(img && img.complete && !img.naturalWidth),
+              src: img ? img.currentSrc || img.getAttribute("src") : ""
+            };
+          });
+          fetch("http://127.0.0.1:7903/ingest/56218287-ad98-4c23-8321-06cdb62c178a",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"4fea1a"},body:JSON.stringify({sessionId:"4fea1a",runId:"pre-fix",hypothesisId:id==="shorts"?"A":"A",location:"channel.html:fillBox",message:"media grid layout",data:{phase,id,extraClass,href:location.href,gridCols:getComputedStyle(el).gridTemplateColumns,gridW:el.clientWidth,cards},timestamp:Date.now()})}).catch(()=>{});
+        };
+        requestAnimationFrame(() => report("raf"));
+        el.querySelectorAll("img.thumb").forEach(img => {
+          img.addEventListener("error", () => {
+            fetch("http://127.0.0.1:7903/ingest/56218287-ad98-4c23-8321-06cdb62c178a",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"4fea1a"},body:JSON.stringify({sessionId:"4fea1a",runId:"pre-fix",hypothesisId:"B",location:"channel.html:img.error",message:"thumb load error",data:{src:img.src,title:id},timestamp:Date.now()})}).catch(()=>{});
+          });
+          if (!img.complete) img.addEventListener("load", () => report("img-load"), { once: true });
+        });
+      }
+      // #endregion
+      wireThumbs(el);
+    }
+    function wireThumbs(el) {
+      el.querySelectorAll("img.thumb").forEach(img => {
+        const retryThumb = function (reason) {
+          const n = Number(img.dataset.mtRetry || 0);
+          // #region agent log
+          fetch("http://127.0.0.1:7903/ingest/56218287-ad98-4c23-8321-06cdb62c178a",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"4fea1a"},body:JSON.stringify({sessionId:"4fea1a",runId:"post-fix",hypothesisId:"E",location:"channel.html:retryThumb",message:"thumb retry start",data:{reason,n,src:img.src,complete:img.complete,naturalW:img.naturalWidth},timestamp:Date.now()})}).catch(()=>{});
+          fetch(img.src,{cache:"no-store"}).then(r=>{fetch("http://127.0.0.1:7903/ingest/56218287-ad98-4c23-8321-06cdb62c178a",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"4fea1a"},body:JSON.stringify({sessionId:"4fea1a",runId:"post-fix",hypothesisId:"B",location:"channel.html:thumb-http",message:"thumb http probe",data:{src:img.src,http:r.status,ctype:r.headers.get("content-type"),n,reason},timestamp:Date.now()})}).catch(()=>{});}).catch(()=>{});
+          // #endregion
+          if (n >= 15) return;
+          img.dataset.mtRetry = String(n + 1);
+          const u = new URL(img.getAttribute("src") || img.src, location.origin);
+          u.searchParams.set("r", String(n + 1));
+          const delay = reason === "already-broken" ? 0 : 1000 * (n + 1);
+          setTimeout(() => { img.src = u.toString(); }, delay);
+        };
+        img.addEventListener("error", function () { retryThumb("error-event"); });
+        img.addEventListener("load", function () {
+          if (!Number(img.dataset.mtRetry || 0)) return;
+          // #region agent log
+          fetch("http://127.0.0.1:7903/ingest/56218287-ad98-4c23-8321-06cdb62c178a",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"4fea1a"},body:JSON.stringify({sessionId:"4fea1a",runId:"post-fix",hypothesisId:"B",location:"channel.html:thumb-retry",message:"thumb retry ok",data:{src:img.src,naturalW:img.naturalWidth},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
+        });
+        if (img.complete && !img.naturalWidth && (img.getAttribute("src") || img.src)) {
+          retryThumb("already-broken");
+        }
+      });
+    }
+    function fmtHMS(ms) {
+      if (!Number.isFinite(ms) || ms < 0) ms = 0;
+      const s = Math.floor(ms / 1000);
+      const h = Math.floor(s / 3600);
+      const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+      const sec = String(s % 60).padStart(2, "0");
+      if (h < 1) return m + ":" + sec;
+      return String(h).padStart(2, "0") + ":" + m + ":" + sec;
+    }
+    let liveDurTimer = 0;
+    function startLiveDurTick() {
+      if (liveDurTimer) return;
+      liveDurTimer = setInterval(() => {
+        document.querySelectorAll(".thumb-dur[data-live-start]").forEach(el => {
+          const t = new Date(el.dataset.liveStart).getTime();
+          if (Number.isFinite(t)) el.textContent = fmtHMS(Date.now() - t);
+        });
+      }, 1000);
+    }
+    function timeAgo(iso) {
+      if (!iso) return "";
+      const t = new Date(iso).getTime();
+      if (!Number.isFinite(t)) return "";
+      const sec = Math.max(0, Math.round((Date.now() - t) / 1000));
+      if (sec < 60) return sec + "秒前";
+      const min = Math.round(sec / 60);
+      if (min < 60) return min + "分钟前";
+      const hour = Math.round(min / 60);
+      if (hour < 24) return hour + "小时前";
+      const day = Math.round(hour / 24);
+      if (day < 30) return day + "天前";
+      const month = Math.round(day / 30);
+      if (month < 12) return month + "个月前";
+      return Math.round(day / 365) + "年前";
+    }
+    function viewMeta(views, when, sizeLabel) {
+      const ago = timeAgo(when);
+      let s = (views == null ? 0 : views) + "次观看";
+      if (ago) s += " · " + ago;
+      if (MANAGE && sizeLabel) s += " · " + sizeLabel;
+      return s;
+    }
+    function mediaCard(href, thumbUrl, title, kind, views, when, vis, opts) {
+      opts = opts || {};
+      const cls = kind === "short" ? "media-card short" : "media-card";
+      const thumb = thumbUrl
+        ? `<img class="thumb" src="${esc(thumbUrl)}" alt="">`
+        : `<div class="thumb-empty"></div>`;
+      const liveNow = !!opts.liveNow;
+      const trash = !!opts.trash;
+      const type = opts.type || "video";
+      const id = opts.id || "";
+      let extras = "";
+      if (MANAGE && !liveNow) {
+        extras += `<label class="media-pick"><input type="checkbox" data-type="${esc(type)}" data-id="${esc(id)}" data-title="${esc(title)}"></label>`;
+      }
+      if (MANAGE && !liveNow && !trash) {
+        const hidden = vis === "private";
+        extras += `<button type="button" class="vis-eye" data-type="${esc(type)}" data-id="${esc(id)}" data-vis="${esc(vis || "public")}" title="${hidden ? "已隐藏，点击公开" : "公开，点击隐藏"}" aria-label="${hidden ? "已隐藏" : "公开"}">${hidden ? EYE_CLOSED : EYE_OPEN}</button>`;
+      } else if (!MANAGE && vis === "private") {
+        extras += `<span class="vis-private" title="私藏" aria-label="私藏">${EYE_CLOSED}</span>`;
+      }
+      if (opts.liveStart) {
+        extras += `<span class="thumb-dur" data-live-start="${esc(opts.liveStart)}">${esc(fmtHMS(Date.now() - new Date(opts.liveStart).getTime()))}</span>`;
+      } else if (opts.durationMs != null && Number.isFinite(Number(opts.durationMs))) {
+        extras += `<span class="thumb-dur">${esc(fmtHMS(Number(opts.durationMs)))}</span>`;
+      }
+      return `<div class="${cls}"><span class="thumb-wrap"><a class="thumb-link" href="${esc(href)}">${thumb}</a>${extras}</span><a class="media-title" href="${esc(href)}" title="${esc(title)}">${esc(title)}</a><span class="media-sub">${esc(viewMeta(views, when, opts.sizeLabel))}</span></div>`;
+    }
+    function videoCards(items, hrefPrefix, kind, extra) {
+      extra = extra || {};
+      return (items || []).map(v => mediaCard(
+        hrefPrefix + v.id + (extra.query || ""),
+        v.thumbnailUrl,
+        v.title,
+        kind,
+        v.viewCount,
+        v.publishedAt || v.createdAt,
+        v.visibility,
+        Object.assign({ id: v.id, type: "video", durationMs: v.durationMs, sizeLabel: v.sizeLabel }, extra)
+      )).join("");
+    }
+    function liveCards(items, extra) {
+      return (items || []).map(l => {
+        const opts = Object.assign({ id: l.id, type: "live", liveNow: l.status === "live" }, extra || {});
+        if (l.status !== "live" && l.sizeLabel) opts.sizeLabel = l.sizeLabel;
+        if (l.status === "live" && l.startedAt) {
+          opts.liveStart = l.startedAt;
+        } else if (l.startedAt && l.endedAt) {
+          opts.durationMs = new Date(l.endedAt).getTime() - new Date(l.startedAt).getTime();
+        }
+        return mediaCard(
+          "/live/" + l.id,
+          l.thumbnailUrl,
+          l.title,
+          "",
+          l.viewerCount,
+          l.startedAt || l.createdAt,
+          l.visibility,
+          opts
+        );
+      }).join("");
+    }
+    function authHeaders() {
+      const t = window.mtAuth && window.mtAuth.getToken();
+      const h = {};
+      if (t) h.Authorization = "Bearer " + t;
+      return h;
+    }
+    async function loadJSON(path) {
+      const r = await fetch(API + path, { headers: authHeaders() });
+      if (!r.ok) throw new Error("加载失败 (" + r.status + ")");
+      return r.json();
+    }
+    function fillMeta(ch) {
+      const n = v => (v == null ? 0 : v);
+      document.getElementById("meta").textContent =
+        "@" + ch.handle +
+        " · " + n(ch.subscriberCount) + "订阅" +
+        " · " + n(ch.videoCount) + "个视频" +
+        " · " + n(ch.shortCount) + "个短视频" +
+        " · " + n(ch.liveCount) + "场直播" +
+        " · " + n(ch.postCount) + "个帖子";
+    }
+    function selectedIn(section) {
+      return [...section.querySelectorAll('input[type="checkbox"]:checked')].map(i => ({
+        type: i.dataset.type,
+        id: i.dataset.id,
+        title: i.dataset.title
+      }));
+    }
+    function confirmTitles(lead, titles, hint) {
+      return new Promise(resolve => {
+        const dlg = document.getElementById("confirmDlg");
+        document.getElementById("confirmLead").textContent = lead;
+        document.getElementById("confirmList").innerHTML = titles.map(t => "<li>" + esc(t) + "</li>").join("");
+        document.getElementById("confirmHint").textContent = hint;
+        const ok = document.getElementById("confirmOk");
+        const cancel = document.getElementById("confirmCancel");
+        const done = (v) => {
+          dlg.close();
+          ok.onclick = null;
+          cancel.onclick = null;
+          resolve(v);
+        };
+        ok.onclick = () => done(true);
+        cancel.onclick = () => done(false);
+        dlg.addEventListener("cancel", ev => { ev.preventDefault(); done(false); }, { once: true });
+        dlg.showModal();
+      });
+    }
+    async function postManage(action, items) {
+      const videoIds = items.filter(i => i.type === "video").map(i => i.id);
+      const liveIds = items.filter(i => i.type === "live").map(i => i.id);
+      const r = await fetch(API + "/v1/channels/" + encodeURIComponent(SLOT) + "/manage", {
+        method: "POST",
+        headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+        body: JSON.stringify({ action, videoIds, liveIds })
+      });
+      if (!r.ok) throw new Error("操作失败 (" + r.status + ")");
+    }
+    async function reloadLists() {
+      const base = "/v1/channels/" + encodeURIComponent(SLOT);
+      const jobs = [
+        loadJSON(base).then(ch => fillMeta(ch)),
+        loadJSON(base + "/videos").then(data => {
+          const html = videoCards(data.items, "/watch/");
+          fillBox("videos", html, html ? "media-grid" : "");
+        }),
+        loadJSON(base + "/videos?kind=short").then(data => {
+          const html = videoCards(data.items, "/shorts/", "short", { query: "?ch=" + encodeURIComponent(SLOT) });
+          fillBox("shorts", html, html ? "media-grid shorts-grid" : "");
+        }),
+        loadJSON(base + "/live").then(data => {
+          const html = liveCards(data.items);
+          fillBox("lives", html, html ? "media-grid" : "");
+        })
+      ];
+      if (MANAGE) jobs.push(loadTrash());
+      const results = await Promise.allSettled(jobs);
+      const firstErr = results.find(r => r.status === "rejected");
+      if (firstErr) throw firstErr.reason;
+    }
+    async function loadTrash() {
+      const data = await loadJSON("/v1/channels/" + encodeURIComponent(SLOT) + "/trash");
+      const long = videoCards(data.videos, "/watch/", "", { trash: true });
+      const shorts = videoCards(data.shorts, "/shorts/", "short", { trash: true });
+      const lives = liveCards(data.lives, { trash: true });
+      fillKind("trashVideos", long);
+      fillKind("trashShorts", shorts, "short");
+      fillKind("trashLives", lives);
+      document.getElementById("trashEmpty").hidden = !!(long || shorts || lives);
+    }
+    function fillKind(id, html, kind) {
+      const el = document.getElementById(id);
+      if (!html) {
+        el.hidden = true;
+        el.className = "";
+        el.innerHTML = "";
+        return;
+      }
+      el.hidden = false;
+      el.className = "media-grid trash-grid" + (kind === "short" ? " shorts-grid" : "");
+      el.innerHTML = html;
+      startLiveDurTick();
+      wireThumbs(el);
+    }
+    function applyCardVis(id, next) {
+      document.querySelectorAll('.vis-eye[data-id="' + id + '"]').forEach(btn => {
+        btn.dataset.vis = next;
+        const hidden = next === "private";
+        btn.title = hidden ? "已隐藏，点击公开" : "公开，点击隐藏";
+        btn.setAttribute("aria-label", hidden ? "已隐藏" : "公开");
+        btn.innerHTML = hidden ? EYE_CLOSED : EYE_OPEN;
+      });
+    }
+    async function toggleEye(btn) {
+      const next = btn.dataset.vis === "private" ? "public" : "private";
+      const type = btn.dataset.type;
+      const id = btn.dataset.id;
+      const path = type === "live" ? "/v1/live/" + id : "/v1/videos/" + id;
+      const r = await fetch(API + path, {
+        method: "PATCH",
+        headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+        body: JSON.stringify({ visibility: next })
+      });
+      if (!r.ok) throw new Error("操作失败 (" + r.status + ")");
+      applyCardVis(id, next);
+    }
+    async function onToolbar(section, act) {
+      if (act === "select-all") {
+        section.querySelectorAll('input[type="checkbox"]').forEach(i => { i.checked = true; });
+        return;
+      }
+      if (act === "invert") {
+        section.querySelectorAll('input[type="checkbox"]').forEach(i => { i.checked = !i.checked; });
+        return;
+      }
+      const items = selectedIn(section);
+      if (!items.length) return;
+      if (act === "hide" || act === "publish") {
+        await postManage(act, items);
+        const next = act === "hide" ? "private" : "public";
+        items.forEach(i => applyCardVis(i.id, next));
+        section.querySelectorAll('input[type="checkbox"]:checked').forEach(i => { i.checked = false; });
+        return;
+      }
+      if (act === "restore") {
+        await postManage(act, items);
+        await reloadLists();
+        return;
+      }
+      if (act === "recycle") {
+        const ok = await confirmTitles(
+          "是否删除以下内容：",
+          items.map(i => i.title),
+          "已删除视频可从回收站找回。"
+        );
+        if (!ok) return;
+        await postManage("recycle", items);
+        await reloadLists();
+        return;
+      }
+      if (act === "purge") {
+        const ok = await confirmTitles(
+          "是否删除以下内容：",
+          items.map(i => i.title),
+          "彻底删除后将不可恢复"
+        );
+        if (!ok) return;
+        await postManage("purge", items);
+        await reloadLists();
+      }
+    }
+    async function main() {
+      const base = "/v1/channels/" + encodeURIComponent(SLOT);
+      const ch = await loadJSON(base);
+      document.getElementById("title").textContent = ch.name;
+      document.title = (MANAGE ? "管理 · " : "") + ch.name + " · MiniTube";
+      fillAvatar(ch);
+      fillMeta(ch);
+      const tok = window.mtAuth && window.mtAuth.getToken();
+      let isOwner = false;
+      if (tok) {
+        try {
+          const me = await loadJSON("/v1/me");
+          isOwner = me.username === ch.ownerUsername;
+        } catch (e) {}
+      }
+      if (MANAGE && !isOwner) {
+        location.replace("/c/" + encodeURIComponent(SLOT));
+        return;
+      }
+      if (isOwner) {
+        document.getElementById("ownerActions").classList.add("is-on");
+        const q = "?channel=" + encodeURIComponent(ch.id) + "&handle=" + encodeURIComponent(ch.handle);
+        document.getElementById("pubLong").href = "/publish" + q + "&kind=long";
+        document.getElementById("pubShort").href = "/publish" + q + "&kind=short";
+        const menu = document.getElementById("publishMenu");
+        document.getElementById("publishBtn").addEventListener("click", (e) => {
+          e.stopPropagation();
+          menu.hidden = !menu.hidden;
+        });
+        document.addEventListener("click", () => { menu.hidden = true; });
+        menu.addEventListener("click", e => e.stopPropagation());
+        const manageBtn = document.getElementById("manageBtn");
+        if (MANAGE) {
+          manageBtn.textContent = "返回频道";
+          manageBtn.addEventListener("click", () => { location.href = "/c/" + encodeURIComponent(SLOT); });
+        } else {
+          manageBtn.addEventListener("click", () => { location.href = "/c/" + encodeURIComponent(SLOT) + "/manage"; });
+        }
+      }
+      if (MANAGE && isOwner) {
+        document.querySelectorAll(".ch-toolbar[data-kind=media]").forEach(el => el.classList.add("is-on"));
+        document.getElementById("trashSection").hidden = false;
+      }
+      document.addEventListener("click", e => {
+        const eye = e.target.closest(".vis-eye");
+        if (eye) {
+          e.preventDefault();
+          toggleEye(eye).catch(err => { document.getElementById("err").textContent = err.message; });
+          return;
+        }
+        const btn = e.target.closest(".ch-toolbar button[data-act]");
+        if (!btn) return;
+        const section = btn.closest("section");
+        onToolbar(section, btn.dataset.act).catch(err => { document.getElementById("err").textContent = err.message; });
+      });
+      const jobs = [
+        loadJSON(base + "/live").then(data => {
+          const html = liveCards(data.items);
+          fillBox("lives", html, html ? "media-grid" : "");
+        }),
+        loadJSON(base + "/videos").then(data => {
+          const html = videoCards(data.items, "/watch/");
+          fillBox("videos", html, html ? "media-grid" : "");
+        }),
+        loadJSON(base + "/videos?kind=short").then(data => {
+          const html = videoCards(data.items, "/shorts/", "short", { query: "?ch=" + encodeURIComponent(SLOT) });
+          fillBox("shorts", html, html ? "media-grid shorts-grid" : "");
+        }),
+        loadJSON(base + "/posts").then(data => {
+          fillBox("posts", (data.items || []).map(p =>
+            `<article class="post-card"><a class="post-card-link" href="/post/${esc(p.id)}">${renderPostImages(p.imageUrls)}<span class="post-body">${esc(p.body)}</span><span class="media-sub">${esc(viewMeta(p.viewCount, p.createdAt))}</span></a></article>`
+          ).join(""));
+        })
+      ];
+      if (MANAGE && isOwner) jobs.push(loadTrash());
+      const results = await Promise.allSettled(jobs);
+      const firstErr = results.find(r => r.status === "rejected");
+      if (firstErr) throw firstErr.reason;
+    }
+    main().catch(e => { document.getElementById("err").textContent = e.message; });
+  </script>
+  <script src="/static/account.js"></script>
+</body>
+</html>

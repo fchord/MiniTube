@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: minitube-media
+spec:
+  capacity:
+    storage: 200Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+    - noatime
+    - actimeo=0
+  nfs:
+    server: 192.168.43.131
+    path: /data/minitube
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minitube-media
+  namespace: minitube
+spec:
+  accessModes:
+    - ReadWriteMany
+  volumeName: minitube-media
+  resources:
+    requests:
+      storage: 200Gi

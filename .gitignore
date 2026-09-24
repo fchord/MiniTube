@@ -1,0 +1,29 @@
+# 本地与密钥
+.env
+.env.*
+!.env.example
+
+# 依赖与构建
+node_modules/
+vendor/
+.dart_tool/
+.packages
+build/
+dist/
+target/
+*.pyc
+__pycache__/
+
+# IDE / OS
+.idea/
+.vscode/
+.cursor/
+*.swp
+.DS_Store
+
+# 媒体与日志
+*.log
+uploads/
+tmp/
+data/
+api/data/

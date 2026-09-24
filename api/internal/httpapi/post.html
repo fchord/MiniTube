@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>MiniTube</title>
+  <link rel="stylesheet" href="/static/post-media.css"/>
+  <link rel="stylesheet" href="/static/account.css"/>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+    header { padding: 12px 16px; background: #1a1a1a; }
+    header a { color: #8ab4ff; text-decoration: none; }
+    main { max-width: 720px; margin: 0 auto; padding: 16px; }
+    .meta { color: #aaa; font-size: .9rem; }
+    .err { color: #f88; }
+    .cmt { background: #1a1a1a; padding: 8px 12px; margin: 8px 0; border-radius: 6px; }
+    textarea, button, input { display: block; width: 100%; margin: 8px 0; box-sizing: border-box; }
+    textarea, input { background: #1a1a1a; color: #eee; border: 1px solid #333; padding: 8px; border-radius: 6px; }
+    button { background: #3b6; color: #111; border: 0; padding: 10px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    #interact { display: none; }
+  </style>
+</head>
+<body>
+  <header><a href="/">MiniTube</a> · <a href="/live">直播</a> · <a href="/shorts">短视频</a> · <a href="/compose">发帖</a> · <a href="/feed">时间线</a></header>
+  <main>
+    <p class="meta" id="meta"></p>
+    <p id="body"></p>
+    <div id="imgs"></div>
+    <p id="mention"></p>
+    <div id="interact">
+      <button id="likeBtn" type="button">点赞</button>
+      <form id="cmtForm">
+        <textarea id="cmtBody" maxlength="2000" placeholder="写评论" required></textarea>
+        <button type="submit">发送评论</button>
+      </form>
+    </div>
+    <h2>评论</h2>
+    <div id="comments"></div>
+    <p class="err" id="err"></p>
+  </main>
+  <script src="/static/post-media.js"></script>
+  <script>
+    const SLOT = "__SLOT__";
+    const API = location.origin;
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    }
+    function token() { return window.mtAuth.getToken(); }
+    async function api(method, path, body, tok) {
+      const headers = { "Content-Type": "application/json" };
+      if (tok) headers.Authorization = "Bearer " + tok;
+      const r = await fetch(API + path, { method, headers, body: body == null ? undefined : JSON.stringify(body) });
+      const text = await r.text();
+      let data = {};
+      try { data = text ? JSON.parse(text) : {}; } catch {}
+      if (!r.ok) throw new Error(data.message || ("HTTP " + r.status));
+      return data;
+    }
+    async function main() {
+      const headers = {};
+      if (token()) headers.Authorization = "Bearer " + token();
+      const p = await fetch(API + "/v1/posts/" + encodeURIComponent(SLOT), { headers }).then(r => { if (!r.ok) throw new Error("帖子不存在"); return r.json(); });
+      document.title = "帖子 · MiniTube";
+      document.getElementById("meta").innerHTML =
+        `<a href="/u/${esc(p.author.username)}">${esc(p.author.nickname || p.author.username)}</a>` +
+        (p.channel ? ` · <a href="/c/${esc(p.channel.handle)}">@${esc(p.channel.handle)}</a>` : "") +
+        ` · ${esc(p.likeCount)} 赞 · ${esc(p.commentCount)} 评`;
+      document.getElementById("body").textContent = p.body;
+      document.getElementById("imgs").innerHTML = renderPostImages(p.imageUrls);
+      if (p.mentionedVideoId) {
+        document.getElementById("mention").innerHTML = `<a href="/watch/${esc(p.mentionedVideoId)}">提到的视频</a>`;
+      }
+      const cm = await fetch(API + "/v1/posts/" + encodeURIComponent(SLOT) + "/comments").then(r => r.json());
+      const cbox = document.getElementById("comments");
+      (cm.items || []).forEach(c => {
+        cbox.insertAdjacentHTML("beforeend", `<div class="cmt"><span class="meta">${esc(c.user.username)}</span><div></div></div>`);
+        cbox.lastElementChild.lastElementChild.textContent = c.body;
+      });
+      if (token()) {
+        document.getElementById("interact").style.display = "block";
+        const btn = document.getElementById("likeBtn");
+        btn.textContent = p.liked ? "取消点赞" : "点赞";
+        btn.addEventListener("click", async () => {
+          try {
+            if (btn.textContent === "点赞") {
+              await api("POST", "/v1/posts/" + SLOT + "/like", null, token());
+              btn.textContent = "取消点赞";
+            } else {
+              await api("DELETE", "/v1/posts/" + SLOT + "/like", null, token());
+              btn.textContent = "点赞";
+            }
+          } catch (e) { document.getElementById("err").textContent = e.message; }
+        });
+        document.getElementById("cmtForm").addEventListener("submit", async e => {
+          e.preventDefault();
+          try {
+            const created = await api("POST", "/v1/posts/" + SLOT + "/comments", { body: document.getElementById("cmtBody").value }, token());
+            cbox.insertAdjacentHTML("beforeend", `<div class="cmt"><span class="meta">${esc(created.user.username)}</span><div></div></div>`);
+            cbox.lastElementChild.lastElementChild.textContent = created.body;
+            document.getElementById("cmtBody").value = "";
+          } catch (err) { document.getElementById("err").textContent = err.message; }
+        });
+      }
+    }
+    main().catch(e => { document.getElementById("err").textContent = e.message; });
+  </script>
+  <script src="/static/account.js"></script>
+</body>
+</html>

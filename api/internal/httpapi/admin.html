@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>站点管理 · MiniTube</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+    header { padding: 12px 16px; background: #1a1a1a; display: flex; gap: 16px; align-items: center; }
+    header a { color: #8ab4ff; text-decoration: none; }
+    main { max-width: 520px; margin: 0 auto; padding: 24px 16px; }
+    label, input, button, select { display: block; width: 100%; margin: 8px 0; box-sizing: border-box; }
+    input { background: #1a1a1a; color: #eee; border: 1px solid #333; padding: 10px; border-radius: 6px; }
+    button { background: #3b6; color: #111; border: 0; padding: 10px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    button.secondary { background: #333; color: #eee; }
+    .err { color: #f88; }
+    .ok { color: #8d8; }
+    .meta { color: #aaa; font-size: .9rem; }
+    fieldset { border: 1px solid #333; border-radius: 8px; margin: 16px 0; padding: 12px 16px; }
+    legend { padding: 0 6px; color: #ccc; }
+    .row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+    .row input { width: auto; margin: 0; }
+    .row label { display: flex; align-items: center; gap: 8px; margin: 0; width: auto; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/">MiniTube</a>
+    <a href="http://192.168.43.111:8080/admin/setup">维护口令（仅局域网）</a>
+  </header>
+  <main>
+    <h1>站点管理</h1>
+    <p class="err" id="err"></p>
+    <p class="ok" id="ok"></p>
+    <form id="login">
+      <p class="meta">登录需要口令与 Authenticator 动态密码。</p>
+      <label>口令
+        <input id="pass" type="password" autocomplete="current-password" required/>
+      </label>
+      <label>动态密码
+        <input id="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required/>
+      </label>
+      <button type="submit" id="loginBtn">登录</button>
+    </form>
+    <div id="panel" hidden>
+      <fieldset>
+        <legend>shorts_engine</legend>
+        <p class="meta">立刻生效，不必重启。长视频和直播仍走现有播放器。</p>
+        <div class="row">
+          <label><input type="radio" name="engine" value="legacy"/> legacy（hls.js）</label>
+        </div>
+        <div class="row">
+          <label><input type="radio" name="engine" value="webcodecs"/> webcodecs</label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>码流边缘分流</legend>
+        <p class="meta">打开后，中国大陆用户的 HLS 走电信 ctc；关闭后全部走 Cloudflare CDN。</p>
+        <div class="row">
+          <label><input type="checkbox" id="ctc"/> 分流到 ctc</label>
+        </div>
+      </fieldset>
+      <button type="button" id="save">保存</button>
+      <button type="button" class="secondary" id="logout">退出</button>
+    </div>
+  </main>
+  <script>
+    const KEY = "mt_admin_token";
+    const SETUP = "http://192.168.43.111:8080/admin/setup";
+    const errEl = document.getElementById("err");
+    const okEl = document.getElementById("ok");
+    const loginForm = document.getElementById("login");
+    const panel = document.getElementById("panel");
+    const loginBtn = document.getElementById("loginBtn");
+    let retryAfter = 0;
+    let lockTimer = null;
+    function onLan() {
+      const h = location.hostname;
+      return h === "192.168.43.111" || h.startsWith("192.168.43.");
+    }
+    function token() { return sessionStorage.getItem(KEY) || ""; }
+    function setToken(t) { if (t) sessionStorage.setItem(KEY, t); else sessionStorage.removeItem(KEY); }
+    function showErr(m) { errEl.textContent = m || ""; okEl.textContent = ""; }
+    function showOk(m) { okEl.textContent = m || ""; errEl.textContent = ""; }
+    function setLocked(sec) {
+      retryAfter = Math.max(0, sec | 0);
+      loginBtn.disabled = retryAfter > 0;
+      if (retryAfter > 0) showErr("请于 " + retryAfter + " 秒后再试");
+      if (lockTimer) { clearInterval(lockTimer); lockTimer = null; }
+      if (retryAfter <= 0) return;
+      lockTimer = setInterval(() => {
+        retryAfter--;
+        if (retryAfter <= 0) {
+          clearInterval(lockTimer);
+          lockTimer = null;
+          loginBtn.disabled = false;
+          showErr("");
+          return;
+        }
+        showErr("请于 " + retryAfter + " 秒后再试");
+      }, 1000);
+    }
+    function token() { return sessionStorage.getItem(KEY) || ""; }
+    function setToken(t) { if (t) sessionStorage.setItem(KEY, t); else sessionStorage.removeItem(KEY); }
+    function showErr(m) { errEl.textContent = m || ""; okEl.textContent = ""; }
+    function showOk(m) { okEl.textContent = m || ""; errEl.textContent = ""; }
+    function authHeaders(extra) {
+      const h = Object.assign({ "Content-Type": "application/json" }, extra || {});
+      const t = token();
+      if (t) h.Authorization = "Bearer " + t;
+      return h;
+    }
+    async function parse(r) {
+      const data = await r.json().catch(() => ({}));
+      return { ok: r.ok, status: r.status, data };
+    }
+    function loginMsg(code, retryAfter) {
+      if (code === "totp_not_enrolled") return "尚未绑定动态密码，正在前往设置页。";
+      if (code === "locked") return "请于 " + (retryAfter || 1) + " 秒后再试";
+      if (code === "bad_password" || code === "bad_totp") return "口令或动态码错误";
+      if (code === "admin_disabled") return "管理口令尚未初始化";
+      return "登录失败";
+    }
+    async function bootstrap() {
+      const st = await parse(await fetch("/v1/admin/login-status"));
+      if (st.data.retryAfter > 0) setLocked(st.data.retryAfter);
+      if (st.data.totpEnrolled === false) {
+        if (onLan()) { location.replace("/admin/setup"); return; }
+        showErr("尚未绑定动态密码。请在局域网打开 " + SETUP);
+        loginBtn.disabled = true;
+        return;
+      }
+      if (token()) {
+        const site = await parse(await fetch("/v1/admin/site", { headers: authHeaders() }));
+        if (site.ok) { showPanel(site.data); return; }
+        setToken("");
+      }
+    }
+    function showPanel(site) {
+      loginForm.hidden = true;
+      panel.hidden = false;
+      const eng = site.shortsEngine === "webcodecs" ? "webcodecs" : "legacy";
+      document.querySelectorAll("input[name=engine]").forEach(el => { el.checked = el.value === eng; });
+      const edges = site.mediaEdges || [];
+      const hasCtc = edges.some(e => e && e.id === "ctc");
+      document.getElementById("ctc").checked = !!site.mediaEdgeEnabled && hasCtc;
+    }
+    loginForm.addEventListener("submit", async e => {
+      e.preventDefault();
+      if (loginBtn.disabled) return;
+      showErr("");
+      const r = await parse(await fetch("/v1/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          password: document.getElementById("pass").value,
+          totp: document.getElementById("totp").value.trim()
+        })
+      }));
+      if (r.data.code === "totp_not_enrolled") {
+        if (onLan()) { location.replace("/admin/setup"); return; }
+        showErr("尚未绑定动态密码。请在局域网打开 " + SETUP);
+        return;
+      }
+      if (r.data.code === "locked" || r.status === 429) {
+        setLocked(r.data.retryAfter || 1);
+        return;
+      }
+      if (!r.ok) { showErr(loginMsg(r.data.code, r.data.retryAfter)); return; }
+      setToken(r.data.token);
+      document.getElementById("pass").value = "";
+      document.getElementById("totp").value = "";
+      const site = await parse(await fetch("/v1/admin/site", { headers: authHeaders() }));
+      if (!site.ok) { showErr("无法读取站点设置"); return; }
+      showPanel(site.data);
+    });
+    document.getElementById("save").addEventListener("click", async () => {
+      showErr("");
+      const engine = document.querySelector("input[name=engine]:checked")?.value || "legacy";
+      const on = document.getElementById("ctc").checked;
+      const r = await parse(await fetch("/v1/admin/site", {
+        method: "PATCH",
+        headers: authHeaders(),
+        body: JSON.stringify({ shortsEngine: engine, mediaEdgeEnabled: on })
+      }));
+      if (!r.ok) {
+        if (r.status === 401) { setToken(""); location.reload(); return; }
+        showErr(r.data.message || "保存失败");
+        return;
+      }
+      showPanel(r.data);
+      showOk("已保存");
+    });
+    document.getElementById("logout").addEventListener("click", () => {
+      setToken("");
+      location.reload();
+    });
+    bootstrap();
+  </script>
+</body>
+</html>

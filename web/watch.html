@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>MiniTube</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js"></script>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+    header { padding: 12px 16px; background: #1a1a1a; }
+    header a { color: #8ab4ff; text-decoration: none; }
+    main { max-width: 960px; margin: 0 auto; padding: 16px; }
+    video { width: 100%; background: #000; aspect-ratio: 16/9; }
+    h1 { font-size: 1.25rem; font-weight: 600; }
+    .meta { color: #aaa; font-size: .9rem; }
+    .err { color: #f88; }
+  </style>
+</head>
+<body>
+  <header><a href="/">MiniTube</a> · <a href="/live">直播</a> · <a href="/shorts">短视频</a> · <a href="/compose">发帖</a> · <a href="/feed">时间线</a></header>
+  <main>
+    <video id="player" controls playsinline></video>
+    <h1 id="title">加载中…</h1>
+    <p class="meta" id="meta"></p>
+    <p class="err" id="err"></p>
+  </main>
+  <script>
+    const VIDEO_ID = "__VIDEO_ID__";
+    const API = location.origin;
+    const video = document.getElementById("player");
+    const errEl = document.getElementById("err");
+
+    async function main() {
+      const meta = await fetch(API + "/v1/videos/" + VIDEO_ID).then(r => {
+        if (!r.ok) throw new Error("视频不可用 (" + r.status + ")");
+        return r.json();
+      });
+      if (meta.kind === "short") { location.replace("/shorts/" + VIDEO_ID); return; }
+      document.getElementById("title").textContent = meta.title || "未命名";
+      document.title = (meta.title || "MiniTube") + " · MiniTube";
+      document.getElementById("meta").textContent =
+        (meta.channel && meta.channel.name ? meta.channel.name : "") +
+        (meta.durationMs ? " · " + Math.round(meta.durationMs / 1000) + "s" : "");
+      if (meta.thumbnailUrl) video.poster = meta.thumbnailUrl;
+
+      const pb = await fetch(API + "/v1/videos/" + VIDEO_ID + "/playback").then(r => {
+        if (!r.ok) throw new Error("还不能播放 (" + r.status + ")");
+        return r.json();
+      });
+      const src = pb.masterPlaylistUrl;
+      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = src;
+      } else if (window.Hls && Hls.isSupported()) {
+        const hls = new Hls();
+        hls.loadSource(src);
+        hls.attachMedia(video);
+      } else {
+        throw new Error("当前浏览器不支持 HLS");
+      }
+    }
+    main().catch(e => { errEl.textContent = e.message; });
+  </script>
+</body>
+</html>

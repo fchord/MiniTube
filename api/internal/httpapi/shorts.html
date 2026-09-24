@@ -1,0 +1,1133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>短视频 · MiniTube</title>
+  <link rel="stylesheet" href="/static/account.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js"></script>
+  <script src="/static/token.js"></script>
+  <script src="/static/media-edge.js"></script>
+  <style>
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; height: 100%; background: #000; color: #eee;
+      font-family: system-ui, sans-serif;
+      overflow: hidden; overscroll-behavior: none;
+    }
+    header { position: fixed; top: 0; left: 0; right: 0; z-index: 5; padding: 12px 16px; background: linear-gradient(rgba(0,0,0,.7), transparent); }
+    header a { color: #8ab4ff; text-decoration: none; }
+    #feed {
+      height: 100dvh; overflow: hidden; position: relative;
+      touch-action: none; scrollbar-width: none; -ms-overflow-style: none;
+    }
+    #feed::-webkit-scrollbar { display: none; width: 0; height: 0; }
+    .slide {
+      position: absolute; inset: 0; height: 100dvh;
+      display: flex; justify-content: center; align-items: center;
+      background: #000; will-change: transform;
+      visibility: hidden;
+      transform: translate3d(0, 200%, 0);
+    }
+    .stage-box {
+      position: relative;
+      height: 100%;
+      width: min(100%, calc(100dvh * 9 / 16));
+      max-width: 100%;
+      max-height: 100%;
+      background: #000;
+    }
+    .stage-box video,
+    .stage-box canvas.stage {
+      display: block; width: 100%; height: 100%;
+      object-fit: contain; background: #000;
+      pointer-events: none;
+    }
+    .overlay {
+      position: absolute; left: 12px; right: 64px; bottom: 18px;
+      text-shadow: 0 1px 4px #000; pointer-events: none; z-index: 2;
+    }
+    .overlay a { color: #8ab4ff; text-decoration: none; pointer-events: auto; }
+    .title { font-size: 1.05rem; font-weight: 600; margin: 0 0 6px; }
+    .meta, .likecount { color: #ccc; font-size: .9rem; margin: 0 0 4px; }
+    .side {
+      position: absolute; right: 8px; bottom: 72px;
+      display: flex; flex-direction: column; gap: 12px; align-items: center;
+      z-index: 6;
+      pointer-events: auto;
+    }
+    .side button {
+      width: 48px; height: 48px; border: 0; border-radius: 24px;
+      background: rgba(255,255,255,.4); color: #fff; cursor: pointer; font-size: 1.1rem;
+      display: inline-flex; align-items: center; justify-content: center;
+      pointer-events: auto;
+      touch-action: manipulation;
+    }
+    .side button svg { width: 22px; height: 22px; fill: currentColor; pointer-events: none; }
+    .bigplay {
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      width: 64px; height: 64px; border: 0; border-radius: 50%;
+      background: rgba(0,0,0,.42); color: #fff;
+      display: none; align-items: center; justify-content: center;
+      cursor: pointer; z-index: 3; padding: 0;
+    }
+    .slide.is-chrome .bigplay { display: flex; }
+    .bigplay svg { width: 34px; height: 34px; fill: currentColor; opacity: .92; }
+    .slide.is-paused .bigplay svg { margin-left: 4px; }
+    .hud-audio {
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      width: 64px; height: 64px; border-radius: 50%;
+      background: rgba(0,0,0,.42); color: #fff;
+      display: none; align-items: center; justify-content: center;
+      pointer-events: none; z-index: 4;
+    }
+    .slide.is-hud-audio .hud-audio { display: flex; }
+    .hud-audio svg { width: 34px; height: 34px; fill: currentColor; opacity: .92; }
+    .scrub {
+      position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+      background: rgba(255,255,255,.22); pointer-events: none; z-index: 4;
+    }
+    .scrub-play {
+      display: block; height: 100%; width: 0;
+      background: #3ea6ff;
+    }
+    .err { position: fixed; left: 16px; bottom: 16px; color: #f88; z-index: 6; }
+    .empty { height: 100dvh; display: flex; align-items: center; justify-content: center; color: #888; }
+  </style>
+</head>
+<body>
+  <header><a href="/">MiniTube</a> · <a href="/live">直播</a> · <a href="/shorts">短视频</a> · <a href="/shorts/hwtest">硬解测试</a> · <a href="/compose">发帖</a> · <a href="/feed">时间线</a></header>
+  <div id="feed"></div>
+  <p class="err" id="err"></p>
+  <script>
+    const START = "__SLOT__";
+    const qs = new URLSearchParams(location.search);
+    const CHANNEL = qs.get("ch") || "";
+    const API = location.origin;
+    const FORWARD_MAX = 3;
+    const BACK = 1;
+    const SLIDE_KEY_MS = 560;
+    const SLIDE_FLICK_MS = 420;
+    const SLIDE_BACK_MS = 380;
+    const ICONS = {
+      play: '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
+      pause: '<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>',
+      vol: '<svg viewBox="0 0 24 24"><path d="M5 10v4h4l5 4V6l-5 4H5zm11.5 2a3.5 3.5 0 0 0-1.8-3.1v6.2A3.5 3.5 0 0 0 16.5 12zm-1.8-7.4v2.1A6.5 6.5 0 0 1 19.5 12a6.5 6.5 0 0 1-4.8 6.3v2.1A8.5 8.5 0 0 0 21.5 12a8.5 8.5 0 0 0-6.8-8.4z"/></svg>',
+      mute: '<svg viewBox="0 0 24 24"><path d="M5 10v4h4l5 4V6l-5 4H5zm12.5 1.5 2-2 1.4 1.4-2 2 2 2-1.4 1.4-2-2-2 2-1.4-1.4 2-2-2-2 1.4-1.4 2 2z"/></svg>'
+    };
+    const feedEl = document.getElementById("feed");
+    const errEl = document.getElementById("err");
+    function slog() {
+      try { console.log.apply(console, ["[mt-shorts]"].concat([].slice.call(arguments))); } catch (e) {}
+    }
+    let lastHotSkip = "";
+    const seen = new Set();
+    let items = [];
+    let fwdK = FORWARD_MAX;
+    let circular = false;
+    let exhausted = false;
+    let loading = false;
+    let activeId = null;
+    let muted = true;
+    let chromeTimer = 0;
+    let muteHudTimer = 0;
+    let progRaf = 0;
+    let windowBusy = false;
+    let windowAgain = false;
+    let neighborTimer = 0;
+    let MODE = "legacy";
+    let wc = null;
+    let actGen = 0;
+    const pbMemo = Object.create(null);
+    let sliding = false;
+    let slideDir = 0;
+    let baseIdx = 0;
+    let shift = 0;
+    let animRaf = 0;
+    let pendingDir = 0;
+    let drag = null;
+    let ignoreClick = false;
+    let wheelLock = 0;
+    let xformIds = [];
+
+    function token() { return window.mtAuth && window.mtAuth.getToken(); }
+    function headers() {
+      const h = {};
+      if (token()) h.Authorization = "Bearer " + token();
+      return h;
+    }
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    }
+    function sameOriginMedia(url) {
+      if (window.mtMedia && window.mtMedia.rewrite) return window.mtMedia.rewrite(url);
+      if (!url) return url;
+      try {
+        const u = new URL(url, location.origin);
+        const p = u.pathname || "";
+        if (p.indexOf("/v1/media/") === 0 || p.indexOf("/v1/live/") === 0) {
+          return location.origin + p + u.search + u.hash;
+        }
+      } catch (e) {}
+      return url;
+    }
+    async function getJSON(path) {
+      const r = await fetch(API + path, { headers: headers(), cache: "no-store" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.message || ("HTTP " + r.status));
+      return data;
+    }
+    function videoEl(id) {
+      const s = document.getElementById("s-" + id);
+      return s ? s.querySelector("video") : null;
+    }
+    function slideEl(id) { return document.getElementById("s-" + id); }
+    function idxOf(id) { return items.findIndex(x => x.id === id); }
+    function wrapIdx(i) {
+      if (!items.length) return -1;
+      if (circular) return ((i % items.length) + items.length) % items.length;
+      if (i < 0 || i >= items.length) return -1;
+      return i;
+    }
+    function easeInOutPoly(t) {
+      const k = (Math.PI * Math.PI) / 4;
+      const A = 96 - 16 * k;
+      const B = 32 * k - 160;
+      function rise(p) { return p * p * p * p * p * (A + B * p); }
+      if (t <= 0.5) return rise(t);
+      return 1 - rise(1 - t);
+    }
+    function easeOutSine(t) { return Math.sin((t * Math.PI) / 2); }
+    function setSlidePos(id, pos) {
+      const el = slideEl(id);
+      if (!el) return;
+      el.style.transform = "translate3d(0," + (pos * 100) + "%,0)";
+      el.style.visibility = Math.abs(pos) < 1.02 ? "visible" : "hidden";
+    }
+    function applyTransforms(idx, sh) {
+      const next = wrapIdx(idx + 1);
+      const prev = wrapIdx(idx - 1);
+      const want = [];
+      function add(i, pos) {
+        if (i < 0 || !items[i]) return;
+        const id = items[i].id;
+        if (want.indexOf(id) >= 0) return;
+        want.push(id);
+        setSlidePos(id, pos);
+      }
+      add(idx, -sh);
+      if (sh > 1e-4) add(next, 1 - sh);
+      else if (sh < -1e-4) add(prev, -1 - sh);
+      else {
+        add(next, 1);
+        if (prev !== next) add(prev, -1);
+      }
+      xformIds.forEach(function (id) {
+        if (want.indexOf(id) >= 0) return;
+        setSlidePos(id, 2);
+      });
+      xformIds = want;
+    }
+    function layoutNow() {
+      baseIdx = Math.max(0, idxOf(activeId));
+      shift = 0;
+      applyTransforms(baseIdx, 0);
+    }
+    function fitStageBox(box, mw, mh) {
+      if (!box || !mw || !mh) return;
+      const slide = box.closest(".slide");
+      if (!slide) return;
+      const maxW = slide.clientWidth || window.innerWidth;
+      const maxH = slide.clientHeight || window.innerHeight;
+      const s = Math.min(maxW / mw, maxH / mh);
+      box.style.width = Math.round(mw * s) + "px";
+      box.style.height = Math.round(mh * s) + "px";
+    }
+    function finishSlide(dir) {
+      const n = wrapIdx(baseIdx + dir);
+      shift = 0;
+      sliding = false;
+      slideDir = 0;
+      animRaf = 0;
+      if (n >= 0) baseIdx = n;
+      applyTransforms(baseIdx, 0);
+      const extra = pendingDir;
+      pendingDir = 0;
+      slog("slide-end", dir > 0 ? "down" : "up", "landSeq=" + n, "land=" + (n >= 0 ? items[n].id : ""));
+      if (n >= 0) activate(items[n].id);
+      if (extra) step(extra);
+    }
+    function logRafStats(tag, dts, wallMs) {
+      if (!dts.length) {
+        slog(tag, "n=0", "wall=" + wallMs.toFixed(0) + "ms");
+        return;
+      }
+      let sum = 0;
+      let min = dts[0];
+      let max = dts[0];
+      let over20 = 0;
+      for (let i = 0; i < dts.length; i++) {
+        const d = dts[i];
+        sum += d;
+        if (d < min) min = d;
+        if (d > max) max = d;
+        if (d >= 20) over20 += 1;
+      }
+      const avg = sum / dts.length;
+      const hz = avg > 0.1 ? (1000 / avg) : 0;
+      const rr = (typeof screen !== "undefined" && screen.refreshRate) ? Number(screen.refreshRate) : 0;
+      slog(tag, "n=" + dts.length, "avg=" + avg.toFixed(1) + "ms", "estHz=" + hz.toFixed(1), "min=" + min.toFixed(1), "max=" + max.toFixed(1), "over20=" + over20, "wall=" + wallMs.toFixed(0) + "ms", "screenHz=" + rr);
+    }
+    function animateShift(from, to, dur, ease) {
+      if (animRaf) cancelAnimationFrame(animRaf);
+      sliding = true;
+      let t0 = 0;
+      let prevNow = 0;
+      const dts = [];
+      const dir = to > 0.5 ? 1 : to < -0.5 ? -1 : 0;
+      function frame(now) {
+        if (!t0) t0 = now;
+        else dts.push(now - prevNow);
+        prevNow = now;
+        const p = Math.min(1, (now - t0) / dur);
+        shift = from + (to - from) * ease(p);
+        applyTransforms(baseIdx, shift);
+        if (p < 1) {
+          animRaf = requestAnimationFrame(frame);
+          return;
+        }
+        logRafStats("raf-dt", dts, now - t0);
+        if (dir) finishSlide(dir);
+        else {
+          shift = 0;
+          applyTransforms(baseIdx, 0);
+          sliding = false;
+          slideDir = 0;
+          animRaf = 0;
+        }
+      }
+      animRaf = requestAnimationFrame(frame);
+    }
+    function keepIds(center) {
+      const ids = new Set();
+      const idx = idxOf(center);
+      if (idx < 0) return ids;
+      ids.add(items[idx].id);
+      const b = wrapIdx(idx - BACK);
+      if (b >= 0) ids.add(items[b].id);
+      for (let d = 1; d <= fwdK; d++) {
+        const n = wrapIdx(idx + d);
+        if (n < 0) break;
+        ids.add(items[n].id);
+      }
+      return ids;
+    }
+    function decodeIds(center) {
+      const ids = new Set();
+      const idx = idxOf(center);
+      if (idx < 0) return ids;
+      ids.add(items[idx].id);
+      const p = wrapIdx(idx - 1);
+      if (p >= 0) ids.add(items[p].id);
+      for (let d = 1; d <= fwdK; d++) {
+        const n = wrapIdx(idx + d);
+        if (n < 0) break;
+        ids.add(items[n].id);
+      }
+      if (sliding && items[baseIdx]) ids.add(items[baseIdx].id);
+      return ids;
+    }
+    function isAbortErr(e) {
+      const msg = String((e && e.message) || e || "");
+      return (e && e.name === "AbortError") || /interrupted by a call to pause/i.test(msg);
+    }
+    function playSafe(video) {
+      if (!video) return Promise.resolve();
+      const p = video.play();
+      if (!p || !p.catch) return p;
+      return p.catch(function (e) {
+        if (isAbortErr(e)) return;
+        throw e;
+      });
+    }
+    function hlsOpts(extra) {
+      extra = extra || {};
+      return window.mtAuth && window.mtAuth.hlsConfig ? window.mtAuth.hlsConfig(extra) : extra;
+    }
+    function attach(video, url) {
+      if (video._hls && video._src === url) return Promise.resolve();
+      teardown(video, false);
+      return new Promise((resolve, reject) => {
+        const extra = {
+          enableWorker: true,
+          maxBufferLength: 8,
+          maxMaxBufferLength: 12,
+          startLevel: -1,
+          progressive: false
+        };
+        if (window.Hls && Hls.isSupported()) {
+          extra.startLevel = -1;
+          extra.autoStartLoad = true;
+          const hls = new Hls(hlsOpts(extra));
+          hls.on(Hls.Events.MANIFEST_PARSED, function () {
+            if (hls.levels && hls.levels.length) {
+              const hi = hls.levels.length - 1;
+              hls.startLevel = hi;
+              hls.currentLevel = hi;
+              hls.loadLevel = hi;
+            }
+            resolve();
+          });
+          hls.on(Hls.Events.ERROR, function (_, d) {
+            if (d && d.fatal) reject(new Error(d.details || "hls error"));
+          });
+          hls.loadSource(url);
+          hls.attachMedia(video);
+          video._hls = hls;
+          video._src = url;
+          return;
+        }
+        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = url;
+          video._src = url;
+          video.addEventListener("loadedmetadata", function () { resolve(); }, { once: true });
+          video.addEventListener("error", function () { reject(new Error("当前浏览器不支持 HLS")); }, { once: true });
+          return;
+        }
+        reject(new Error("当前浏览器不支持 HLS"));
+      });
+    }
+    function teardown(video, forgetTime) {
+      if (!video) return;
+      if (!forgetTime) video._t = video.currentTime || video._t || 0;
+      if (video._hls) { video._hls.destroy(); video._hls = null; }
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+      video._src = "";
+      video._ready = false;
+      video._prep = null;
+    }
+    async function playbackURL(id) {
+      if (pbMemo[id]) return pbMemo[id];
+      pbMemo[id] = (async function () {
+        const pb = await getJSON("/v1/videos/" + id + "/playback");
+        if (MODE === "webcodecs") {
+          let best = pb.masterPlaylistUrl;
+          let h = -1;
+          (pb.renditions || []).forEach(function (r) {
+            const rh = Number(r.height) || 0;
+            if (rh >= h && r.playlistUrl) {
+              h = rh;
+              best = r.playlistUrl;
+            }
+          });
+          return sameOriginMedia(best);
+        }
+        return sameOriginMedia(pb.masterPlaylistUrl);
+      })();
+      try {
+        return await pbMemo[id];
+      } catch (e) {
+        delete pbMemo[id];
+        throw e;
+      }
+    }
+    async function prepare(id) {
+      if (MODE === "webcodecs") {
+        if (!wc || wc.has(id)) return;
+        const url = await playbackURL(id);
+        if (wc.has(id)) return;
+        wc.open(id, url, idxOf(id));
+        return;
+      }
+      const video = videoEl(id);
+      if (!video) return;
+      if (video._ready && video._src) return;
+      if (video._prep) return video._prep;
+      video._prep = (async function () {
+        try {
+          const url = await playbackURL(id);
+          await attach(video, url);
+          video.loop = true;
+          video.muted = true;
+          video.playsInline = true;
+          video.addEventListener("loadedmetadata", function () {
+            fitStageBox(video.parentElement, video.videoWidth, video.videoHeight);
+          }, { once: true });
+          if (video._t > 0.4) {
+            try { video.currentTime = video._t; } catch (e) {}
+          }
+          video._ready = true;
+        } finally {
+          video._prep = null;
+        }
+      })();
+      return video._prep;
+    }
+    async function ensureWindow() {
+      if (!activeId) return;
+      if (windowBusy) {
+        windowAgain = true;
+        slog("window-cost", "skip=busy");
+        return;
+      }
+      windowBusy = true;
+      const t0 = performance.now();
+      try {
+        do {
+          windowAgain = false;
+          const keep = decodeIds(activeId);
+          items.forEach(function (it) {
+            if (keep.has(it.id)) return;
+            if (MODE === "webcodecs" && wc) {
+              wc.close(it.id);
+              return;
+            }
+            const v = videoEl(it.id);
+            if (v && (v._src || v._hls)) teardown(v, false);
+          });
+          if (MODE === "webcodecs" && wc) {
+            const idx = idxOf(activeId);
+            const fwdIds = [];
+            for (let d = 1; d <= fwdK; d++) {
+              const n = wrapIdx(idx + d);
+              if (n < 0) break;
+              fwdIds.push(items[n].id);
+            }
+            const p = wrapIdx(idx - 1);
+            wc.setHotWindow(p >= 0 ? items[p].id : null, fwdIds);
+            const vis = keepIds(activeId);
+            if (sliding && items[baseIdx]) vis.add(items[baseIdx].id);
+            const incoming = wrapIdx(baseIdx + slideDir);
+            if (sliding && incoming >= 0) vis.add(items[incoming].id);
+            wc.pruneHeld(vis);
+          }
+          const idx = idxOf(activeId);
+          const fwdIds = [];
+          for (let d = 1; d <= fwdK; d++) {
+            const n = wrapIdx(idx + d);
+            if (n < 0) break;
+            fwdIds.push(items[n].id);
+          }
+          const prevVid = wrapIdx(idx - 1) >= 0 ? items[wrapIdx(idx - 1)].id : null;
+          const order = [];
+          function addKeep(id) {
+            if (id && keep.has(id) && order.indexOf(id) < 0) order.push(id);
+          }
+          addKeep(activeId);
+          fwdIds.forEach(addKeep);
+          keep.forEach(function (id) {
+            if (id !== prevVid) addKeep(id);
+          });
+          addKeep(prevVid);
+          const neighborsOk = MODE !== "webcodecs" || !wc || (wc.neighborsReady ? wc.neighborsReady() : wc.listenReady());
+          for (let i = 0; i < order.length; i++) {
+            const id = order[i];
+            if (id !== activeId && !neighborsOk) continue;
+            try {
+              await prepare(id);
+            } catch (e) {
+              if (isAbortErr(e)) continue;
+              if (fwdK > 1 && id !== activeId) fwdK -= 1;
+              else if (id === activeId) errEl.textContent = e.message || "播放失败";
+            }
+          }
+          if (MODE === "webcodecs" && wc && !neighborsOk) {
+            if (!neighborTimer) {
+              neighborTimer = setTimeout(function () {
+                neighborTimer = 0;
+                ensureWindow();
+              }, 250);
+            }
+          } else if (neighborTimer) {
+            clearTimeout(neighborTimer);
+            neighborTimer = 0;
+          }
+        } while (windowAgain);
+      } finally {
+        windowBusy = false;
+        slog("window-cost", (performance.now() - t0).toFixed(1) + "ms", "id=" + activeId);
+      }
+    }
+    function setSlideUi(id) {
+      const slide = slideEl(id);
+      if (!slide) return;
+      let paused = false;
+      if (MODE === "webcodecs") {
+        paused = !!(wc && wc.isPaused());
+      } else {
+        const video = videoEl(id);
+        if (!video) return;
+        paused = video.paused;
+      }
+      if (slide.dataset.uiPaused === String(paused)) return;
+      slide.dataset.uiPaused = String(paused);
+      slide.classList.toggle("is-paused", paused);
+      const btn = slide.querySelector(".bigplay");
+      if (btn) {
+        btn.innerHTML = paused ? ICONS.play : ICONS.pause;
+        btn.setAttribute("aria-label", paused ? "播放" : "暂停");
+      }
+    }
+    function isCoarsePointer() {
+      return !!(window.matchMedia && window.matchMedia("(hover: none)").matches && window.matchMedia("(pointer: coarse)").matches);
+    }
+    function pointInRect(x, y, el) {
+      if (!el || !el.getBoundingClientRect) return false;
+      const r = el.getBoundingClientRect();
+      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom && r.width > 0 && r.height > 0;
+    }
+    function hitPicture(x, y) {
+      const slide = slideEl(activeId);
+      if (!slide) return false;
+      return pointInRect(x, y, slide.querySelector(".stage-box"));
+    }
+    function hitUiControl(x, y) {
+      const header = document.querySelector("header");
+      if (pointInRect(x, y, header)) return header;
+      const slide = slideEl(activeId) || feedEl;
+      const nodes = slide.querySelectorAll(".mute, .like, .bigplay, .overlay a");
+      for (let i = 0; i < nodes.length; i++) {
+        if (pointInRect(x, y, nodes[i])) return nodes[i];
+      }
+      return null;
+    }
+    function showChrome(id, ms) {
+      const slide = slideEl(id);
+      if (!slide) return;
+      setSlideUi(id);
+      slide.classList.add("is-chrome");
+      clearTimeout(chromeTimer);
+      let paused = slide.classList.contains("is-paused");
+      if (!paused) {
+        chromeTimer = setTimeout(function () { slide.classList.remove("is-chrome"); }, ms || 800);
+      }
+    }
+    function hideChrome(id) {
+      const slide = slideEl(id);
+      if (slide) slide.classList.remove("is-chrome");
+      clearTimeout(chromeTimer);
+    }
+    function flashMuteHud() {
+      const slide = slideEl(activeId);
+      if (!slide) return;
+      const hud = slide.querySelector(".hud-audio");
+      if (hud) hud.innerHTML = muted ? ICONS.mute : ICONS.vol;
+      slide.classList.add("is-hud-audio");
+      clearTimeout(muteHudTimer);
+      muteHudTimer = setTimeout(function () { slide.classList.remove("is-hud-audio"); }, 800);
+    }
+    function togglePlayback(id) {
+      id = id || activeId;
+      if (!id) return;
+      if (MODE === "webcodecs" && wc) wc.toggle();
+      else {
+        const v = videoEl(id);
+        if (!v) return;
+        if (v.paused) playSafe(v);
+        else v.pause();
+      }
+      showChrome(id, 800);
+    }
+    function clipDurationSec(id) {
+      const it = items.find(function (x) { return x.id === id; });
+      const ms = Number(it && it.durationMs) || 0;
+      return ms > 50 ? ms / 1000 : 0;
+    }
+    function progressPct(id) {
+      const dur = clipDurationSec(id);
+      if (!(dur > 0)) return 0;
+      let t = 0;
+      if (MODE === "webcodecs" && wc && wc.mediaTime) t = Number(wc.mediaTime()) || 0;
+      else {
+        const v = videoEl(id);
+        t = v ? Number(v.currentTime) || 0 : 0;
+      }
+      if (!(t >= 0)) t = 0;
+      const m = t % dur;
+      return Math.min(1, Math.max(0, m / dur));
+    }
+    function updateProgress() {
+      if (!activeId) return;
+      const slide = slideEl(activeId);
+      const bar = slide && slide.querySelector(".scrub-play");
+      if (!bar) return;
+      bar.style.width = (progressPct(activeId) * 100).toFixed(2) + "%";
+    }
+    function tickProgress() {
+      progRaf = requestAnimationFrame(tickProgress);
+      updateProgress();
+    }
+    function syncMuteButtons() {
+      const label = muted ? "打开声音" : "静音";
+      document.querySelectorAll(".mute").forEach(function (btn) {
+        if (btn.getAttribute("aria-label") === label) return;
+        btn.innerHTML = muted ? ICONS.mute : ICONS.vol;
+        btn.setAttribute("aria-label", label);
+      });
+      document.querySelectorAll(".slide video").forEach(function (v) {
+        const slide = v.closest(".slide");
+        const id = slide && slide.dataset.id;
+        v.muted = muted || id !== activeId;
+      });
+    }
+    function toggleMute() {
+      muted = !muted;
+      if (wc) {
+        wc.unlockAudio();
+        wc.setMuted(muted);
+      } else {
+        syncMuteButtons();
+        const v = activeId ? videoEl(activeId) : null;
+        if (v && !v.paused && !muted) playSafe(v);
+      }
+      syncMuteButtons();
+    }
+    function queueUrl(id) {
+      let u = "/shorts/" + encodeURIComponent(id);
+      if (CHANNEL) u += "?ch=" + encodeURIComponent(CHANNEL);
+      return u;
+    }
+    async function activate(id) {
+      if (!id) return;
+      const tok = ++actGen;
+      if (activeId === id) {
+        await ensureWindow();
+        return;
+      }
+      if (activeId && activeId !== id) {
+        if (MODE !== "webcodecs") {
+          const prev = videoEl(activeId);
+          if (prev) {
+            prev._t = prev.currentTime || prev._t || 0;
+            prev.pause();
+            prev.muted = true;
+            setSlideUi(activeId);
+            hideChrome(activeId);
+          }
+        } else {
+          hideChrome(activeId);
+        }
+      }
+      document.querySelectorAll(".slide video").forEach(function (v) {
+        const slide = v.closest(".slide");
+        const sid = slide && slide.dataset.id;
+        if (sid !== id) {
+          v.pause();
+          v.muted = true;
+        }
+      });
+      if (MODE === "webcodecs" && wc) wc.activate(id);
+      activeId = id;
+      history.replaceState(null, "", queueUrl(id));
+      await ensureAhead();
+      if (tok !== actGen) return;
+      await ensureWindow();
+      if (tok !== actGen) return;
+      if (MODE === "webcodecs") {
+        setSlideUi(id);
+        return;
+      }
+      const video = videoEl(id);
+      if (!video) return;
+      video.muted = muted;
+      video.loop = true;
+      try {
+        if (video._t > 0.4 && Math.abs((video.currentTime || 0) - video._t) > 0.5) {
+          video.currentTime = video._t;
+        }
+        await playSafe(video);
+      } catch (e) {
+        if (isAbortErr(e) || tok !== actGen) return;
+        video.muted = true;
+        try { await playSafe(video); } catch (e2) {
+          if (!isAbortErr(e2)) errEl.textContent = e2.message || "无法播放";
+        }
+      }
+      if (tok !== actGen) return;
+      setSlideUi(id);
+    }
+    function goTo(id, dir) {
+      if (!slideEl(id)) return;
+      if (!dir || id === activeId) {
+        activate(id);
+        layoutNow();
+        return;
+      }
+      if (sliding) {
+        pendingDir = dir;
+        return;
+      }
+      sliding = true;
+      slideDir = dir > 0 ? 1 : -1;
+      baseIdx = Math.max(0, idxOf(activeId));
+      slog("slide-start", dir > 0 ? "down" : "up", "fromSeq=" + baseIdx, "from=" + activeId, "toSeq=" + idxOf(id), "to=" + id);
+      if (MODE === "webcodecs" && wc) {
+        const tIdle = performance.now();
+        wc.presentIdle(id, true);
+        slog("idle-cost", (performance.now() - tIdle).toFixed(1) + "ms", "id=" + id);
+      }
+      animateShift(0, slideDir, SLIDE_KEY_MS, easeInOutPoly);
+      ensureWindow();
+    }
+    function step(dir) {
+      const idx = idxOf(activeId);
+      slog("key", dir > 0 ? "down" : "up", "fromSeq=" + idx, "from=" + activeId);
+      if (idx < 0) return;
+      if (sliding) { pendingDir = dir; return; }
+      let n = wrapIdx(idx + dir);
+      if (n < 0) {
+        if (dir > 0) {
+          ensureAhead().then(function () {
+            n = wrapIdx(idx + dir);
+            if (n < 0 && items.length > 1 && exhausted) {
+              circular = true;
+              n = wrapIdx(idx + dir);
+            }
+            if (n >= 0) goTo(items[n].id, dir);
+          });
+        } else if (items.length > 1 && exhausted) {
+          circular = true;
+          n = wrapIdx(idx + dir);
+          if (n >= 0) goTo(items[n].id, dir);
+        }
+        return;
+      }
+      goTo(items[n].id, dir);
+    }
+    function slideHTML(v) {
+      const stage = MODE === "webcodecs"
+        ? `<canvas class="stage" aria-hidden="true"></canvas>`
+        : `<video playsinline loop muted poster="${esc(v.thumbnailUrl || "")}"></video>`;
+      return `<section class="slide" data-id="${esc(v.id)}" id="s-${esc(v.id)}">
+        <div class="stage-box">
+          ${stage}
+          <button type="button" class="bigplay" aria-label="播放">${ICONS.play}</button>
+          <div class="hud-audio" aria-hidden="true"></div>
+          <div class="scrub" aria-hidden="true"><i class="scrub-play"></i></div>
+          <div class="overlay">
+            <p class="title">${esc(v.title || "未命名")}</p>
+            <p class="meta">${v.channel ? `<a href="/c/${esc(v.channel.handle)}">@${esc(v.channel.handle)}</a>` : ""}</p>
+            <p class="likecount" data-n="${esc(v.likeCount || 0)}">${esc(v.likeCount || 0)} 赞</p>
+          </div>
+          <div class="side">
+            <button type="button" class="mute" aria-label="打开声音">${ICONS.mute}</button>
+            <button type="button" class="like" data-id="${esc(v.id)}">${v.liked ? "已赞" : "赞"}</button>
+          </div>
+        </div>
+      </section>`;
+    }
+    function append(list) {
+      const fresh = [];
+      (list || []).forEach(v => {
+        if (!v || !v.id || seen.has(v.id)) return;
+        seen.add(v.id);
+        items.push(v);
+        fresh.push(v);
+        feedEl.insertAdjacentHTML("beforeend", slideHTML(v));
+        setSlidePos(v.id, 2);
+      });
+      syncMuteButtons();
+      if (activeId && !sliding) layoutNow();
+      else if (!activeId) applyTransforms(0, 0);
+      return fresh.length;
+    }
+    async function loadRandomPage() {
+      if (loading || exhausted || CHANNEL) return 0;
+      loading = true;
+      try {
+        const exclude = encodeURIComponent([...seen].join(","));
+        const data = await getJSON("/v1/feed/shorts?random=1&limit=8&exclude=" + exclude);
+        const n = append(data.items || []);
+        if (!data.nextCursor || n < 1) exhausted = true;
+        if (exhausted && items.length > 1) circular = true;
+        return n;
+      } catch (e) {
+        errEl.textContent = e.message;
+        return 0;
+      } finally {
+        loading = false;
+      }
+    }
+    async function ensureAhead() {
+      if (CHANNEL || circular) return;
+      const idx = idxOf(activeId);
+      if (idx < 0) return;
+      while (!exhausted && items.length - idx - 1 < fwdK) {
+        const n = await loadRandomPage();
+        if (n < 1) break;
+      }
+    }
+    async function loadChannelQueue() {
+      const data = await getJSON("/v1/channels/" + encodeURIComponent(CHANNEL) + "/videos?kind=short&limit=50");
+      const list = data.items || [];
+      if (START) {
+        const hit = list.find(v => v.id === START);
+        if (hit) {
+          append(list);
+        } else {
+          const cur = await getJSON("/v1/videos/" + encodeURIComponent(START));
+          append([cur].concat(list));
+        }
+      } else {
+        append(list);
+      }
+      circular = items.length > 1;
+      exhausted = true;
+    }
+
+    feedEl.addEventListener("click", async (e) => {
+      if (ignoreClick) {
+        ignoreClick = false;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      const hit = (e.target.closest && e.target.closest(".mute, .like, .bigplay")) || hitUiControl(e.clientX, e.clientY);
+      const muteBtn = hit && hit.closest ? hit.closest(".mute") : null;
+      const likeBtn = hit && hit.closest ? hit.closest(".like") : null;
+      const big = hit && hit.closest ? hit.closest(".bigplay") : null;
+      const slide = (e.target.closest && e.target.closest(".slide")) || slideEl(activeId);
+      if (muteBtn) {
+        e.stopPropagation();
+        toggleMute();
+        return;
+      }
+      if (likeBtn) {
+        e.stopPropagation();
+        const id = likeBtn.dataset.id;
+        if (!token()) { errEl.textContent = "登录后才能点赞"; return; }
+        try {
+          const liked = likeBtn.textContent === "已赞";
+          await fetch(API + "/v1/videos/" + id + "/like", { method: liked ? "DELETE" : "POST", headers: headers() });
+          likeBtn.textContent = liked ? "赞" : "已赞";
+          const slide = likeBtn.closest(".slide");
+          const countEl = slide && slide.querySelector(".likecount");
+          if (countEl) {
+            let n = parseInt(countEl.getAttribute("data-n"), 10) || 0;
+            n += liked ? -1 : 1;
+            if (n < 0) n = 0;
+            countEl.setAttribute("data-n", String(n));
+            countEl.textContent = n + " 赞";
+          }
+        } catch (err) { errEl.textContent = err.message; }
+        return;
+      }
+      if (big) {
+        e.stopPropagation();
+        togglePlayback(slide && slide.dataset.id);
+        return;
+      }
+    });
+    async function onPointerEnd(e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      const d = drag;
+      drag = null;
+      try { feedEl.releasePointerCapture(e.pointerId); } catch (err) {}
+      if (!d.moved) {
+        if (hitUiControl(e.clientX, e.clientY)) return;
+        if (isCoarsePointer()) {
+          const slide = slideEl(activeId);
+          if (!slide) return;
+          if (slide.classList.contains("is-chrome") && !slide.classList.contains("is-paused")) hideChrome(activeId);
+          else showChrome(activeId, 2500);
+        } else {
+          if (!hitPicture(e.clientX, e.clientY)) return;
+          togglePlayback(activeId);
+        }
+        return;
+      }
+      ignoreClick = true;
+      setTimeout(function () { ignoreClick = false; }, 450);
+      const vy = d.vy || 0;
+      let target = 0;
+      if (shift > 0.18 || (shift > 0.05 && vy < -0.35)) target = 1;
+      else if (shift < -0.18 || (shift < -0.05 && vy > 0.35)) target = -1;
+      if (target) {
+        let n = wrapIdx(baseIdx + target);
+        if (n < 0 && target > 0) {
+          await ensureAhead();
+          n = wrapIdx(baseIdx + target);
+          if (n < 0 && items.length > 1 && exhausted) {
+            circular = true;
+            n = wrapIdx(baseIdx + target);
+          }
+        } else if (n < 0 && target < 0 && items.length > 1 && exhausted) {
+          circular = true;
+          n = wrapIdx(baseIdx + target);
+        }
+        if (n < 0) {
+          animateShift(shift, 0, SLIDE_BACK_MS, easeOutSine);
+          return;
+        }
+        sliding = true;
+        slideDir = target;
+        if (MODE === "webcodecs" && wc && n >= 0) {
+          const tIdle = performance.now();
+          wc.presentIdle(items[n].id, true);
+          slog("idle-cost", (performance.now() - tIdle).toFixed(1) + "ms", "id=" + items[n].id);
+        }
+        animateShift(shift, target, SLIDE_FLICK_MS, easeOutSine);
+        ensureWindow();
+      } else {
+        animateShift(shift, 0, SLIDE_BACK_MS, easeOutSine);
+      }
+    }
+    feedEl.addEventListener("pointerdown", function (e) {
+      if (e.button && e.button !== 0) return;
+      if ((e.target.closest && e.target.closest(".mute, .like, .bigplay, a, header")) || hitUiControl(e.clientX, e.clientY)) return;
+      if (sliding) return;
+      drag = {
+        id: e.pointerId, y: e.clientY, lastY: e.clientY,
+        t: performance.now(), lastT: performance.now(), vy: 0, moved: false
+      };
+      try { feedEl.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+    feedEl.addEventListener("pointermove", function (e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      const now = performance.now();
+      const dy = e.clientY - drag.y;
+      const dt = now - drag.lastT;
+      if (dt > 0) drag.vy = (e.clientY - drag.lastY) / dt;
+      drag.lastY = e.clientY;
+      drag.lastT = now;
+      if (!drag.moved && Math.abs(dy) < 8) return;
+      drag.moved = true;
+      ignoreClick = true;
+      const H = feedEl.clientHeight || window.innerHeight;
+      let sh = -dy / H;
+      const idx = Math.max(0, idxOf(activeId));
+      if (!circular) {
+        if (idx <= 0 && sh < 0) sh *= 0.28;
+        if (idx >= items.length - 1 && sh > 0) sh *= 0.28;
+      }
+      shift = sh;
+      baseIdx = idx;
+      applyTransforms(baseIdx, shift);
+    });
+    feedEl.addEventListener("pointerup", onPointerEnd);
+    feedEl.addEventListener("pointercancel", onPointerEnd);
+    feedEl.addEventListener("wheel", function (e) {
+      e.preventDefault();
+      if (sliding || performance.now() < wheelLock) return;
+      if (e.deltaY > 12) { wheelLock = performance.now() + SLIDE_KEY_MS; step(1); }
+      else if (e.deltaY < -12) { wheelLock = performance.now() + SLIDE_KEY_MS; step(-1); }
+    }, { passive: false });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" || e.key === "PageDown") { e.preventDefault(); step(1); }
+      if (e.key === "ArrowUp" || e.key === "PageUp") { e.preventDefault(); step(-1); }
+      if (e.key === " " && activeId) {
+        e.preventDefault();
+        togglePlayback(activeId);
+      }
+      if ((e.key === "m" || e.key === "M") && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        toggleMute();
+        flashMuteHud();
+      }
+    });
+    document.addEventListener("play", function (e) {
+      if (!e.target || e.target.tagName !== "VIDEO") return;
+      const slide = e.target.closest(".slide");
+      if (slide) setSlideUi(slide.dataset.id);
+    }, true);
+    document.addEventListener("pause", function (e) {
+      if (!e.target || e.target.tagName !== "VIDEO") return;
+      const slide = e.target.closest(".slide");
+      if (slide) setSlideUi(slide.dataset.id);
+    }, true);
+
+    async function main() {
+      try {
+        if (CHANNEL) {
+          await loadChannelQueue();
+        } else {
+          if (START) {
+            const v = await getJSON("/v1/videos/" + encodeURIComponent(START));
+            if (v && v.id) append([v]);
+          }
+          await loadRandomPage();
+        }
+      } catch (e) {
+        errEl.textContent = e.message;
+      }
+      if (!items.length) {
+        feedEl.innerHTML = '<div class="empty">还没有短视频</div>';
+        return;
+      }
+      const start = START && seen.has(START) ? START : items[0].id;
+      activate(start);
+      layoutNow();
+    }
+    window.addEventListener("resize", function () {
+      layoutNow();
+      document.querySelectorAll(".stage-box").forEach(function (box) {
+        const media = box.querySelector("video, canvas.stage");
+        if (!media) return;
+        if (media.tagName === "VIDEO" && media.videoWidth) {
+          fitStageBox(box, media.videoWidth, media.videoHeight);
+        } else if (media.tagName === "CANVAS" && media.width) {
+          fitStageBox(box, media.width, media.height);
+        }
+      });
+    });
+    async function boot() {
+      if (window.mtMedia && window.mtMedia.ready) await window.mtMedia.ready();
+      let want = qs.get("engine") || "";
+      try {
+        const site = await getJSON("/v1/public/site");
+        if (!want) want = site.shortsEngine || "legacy";
+      } catch (e) {
+        slog("boot site-settings failed", e && e.message);
+        if (!want) want = "legacy";
+      }
+      const can = typeof VideoDecoder === "function" && typeof AudioDecoder === "function";
+      slog("boot-check", "want=" + want, "VideoDecoder=" + can);
+      if (want === "webcodecs" && can) {
+        MODE = "webcodecs";
+        try {
+          const mod = await import("/static/shorts-engine.js");
+          wc = await mod.create({
+            token: token(),
+            getToken: token,
+            onLog: slog,
+            onError: function (msg, id) {
+              if (isAbortErr(msg)) return;
+              slog("engine-error", "id=" + id, msg);
+              if (id && id !== activeId) {
+                if (fwdK > 1) fwdK -= 1;
+                return;
+              }
+              errEl.textContent = msg || "播放失败";
+            },
+            onMuteChange: function () {},
+            onUi: function (id) { if (id) setSlideUi(id); }
+          });
+          wc.setMuted(true);
+        } catch (e) {
+          slog("boot engine failed", e && e.message);
+          MODE = "legacy";
+          wc = null;
+        }
+        syncMuteButtons();
+      }
+      slog("boot", "mode=" + MODE, "want=" + want, "VideoDecoder=" + can, "wc=" + !!wc);
+      setInterval(function () {
+        if (wc && wc.logHot) {
+          ensureWindow();
+          return;
+        }
+        const skip = "sync skipped mode=" + MODE + " wc=" + !!wc;
+        if (skip === lastHotSkip) return;
+        lastHotSkip = skip;
+        slog(skip);
+      }, 200);
+      if (!progRaf) tickProgress();
+      await main();
+    }
+    boot();
+  </script>
+  <script src="/static/account.js"></script>
+</body>
+</html>

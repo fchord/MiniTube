@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>发帖 · MiniTube</title>
+  <link rel="stylesheet" href="/static/account.css"/>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+    header { padding: 12px 16px; background: #1a1a1a; }
+    header a { color: #8ab4ff; text-decoration: none; }
+    main { max-width: 720px; margin: 0 auto; padding: 16px; }
+    label, input, textarea, select, button { display: block; width: 100%; margin: 8px 0; box-sizing: border-box; }
+    textarea { min-height: 120px; }
+    input, textarea, select { background: #1a1a1a; color: #eee; border: 1px solid #333; padding: 8px; border-radius: 6px; }
+    button { background: #3b6; color: #111; border: 0; padding: 10px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    .err { color: #f88; }
+    .meta { color: #aaa; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <header><a href="/">MiniTube</a> · <a href="/live">直播</a> · <a href="/shorts">短视频</a> · <a href="/compose">发帖</a> · <a href="/feed">时间线</a></header>
+  <main>
+    <h1>发帖</h1>
+    <p class="meta" id="who">先登录（需已验证邮箱）</p>
+    <form id="login">
+      <input id="ident" placeholder="用户名或邮箱" autocomplete="username"/>
+      <input id="pass" type="password" placeholder="密码" autocomplete="current-password"/>
+      <button type="submit">登录</button>
+    </form>
+    <form id="post" hidden>
+      <textarea id="body" maxlength="2000" placeholder="写点什么（1–2000 字）" required></textarea>
+      <label>发布到频道
+        <select id="channel"><option value="">仅出现在个人主页</option></select>
+      </label>
+      <label>提到的视频 ID（可选）
+        <input id="mention" placeholder="视频编号（10位字母或数字）"/>
+      </label>
+      <label>图片（最多 9 张）
+        <input id="files" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple/>
+      </label>
+      <button type="submit">发布</button>
+    </form>
+    <p class="err" id="err"></p>
+  </main>
+  <script>
+    const API = location.origin;
+    const errEl = document.getElementById("err");
+    function token() { return window.mtAuth.getToken(); }
+    async function api(method, path, body, tok) {
+      const headers = { "Content-Type": "application/json" };
+      if (tok) headers.Authorization = "Bearer " + tok;
+      const r = await fetch(API + path, { method, headers, body: body == null ? undefined : JSON.stringify(body) });
+      const text = await r.text();
+      let data = {};
+      try { data = text ? JSON.parse(text) : {}; } catch {}
+      if (!r.ok) throw new Error(data.message || ("HTTP " + r.status));
+      return data;
+    }
+    async function hydrate(tok) {
+      const me = await api("GET", "/v1/me", null, tok);
+      document.getElementById("who").textContent = "以 @" + me.username + " 发帖";
+      document.getElementById("login").hidden = true;
+      document.getElementById("post").hidden = false;
+      const chs = await fetch(API + "/v1/users/" + encodeURIComponent(me.username) + "/channels").then(r => r.json());
+      const sel = document.getElementById("channel");
+      (chs.items || []).forEach(c => {
+        const o = document.createElement("option");
+        o.value = c.id;
+        o.textContent = "@" + c.handle + " · " + c.name;
+        if (me.defaultChannel && me.defaultChannel.id === c.id) o.selected = true;
+        sel.appendChild(o);
+      });
+    }
+    document.getElementById("login").addEventListener("submit", async e => {
+      e.preventDefault();
+      errEl.textContent = "";
+      try {
+        const res = await api("POST", "/v1/auth/login", {
+          identifier: document.getElementById("ident").value,
+          password: document.getElementById("pass").value
+        });
+        window.mtAuth.setToken(res.accessToken);
+        await hydrate(res.accessToken);
+      } catch (err) { errEl.textContent = err.message; }
+    });
+    document.getElementById("post").addEventListener("submit", async e => {
+      e.preventDefault();
+      errEl.textContent = "";
+      const tok = token();
+      try {
+        const files = [...document.getElementById("files").files].slice(0, 9);
+        const keys = [];
+        for (const f of files) {
+          const mime = f.type || "image/png";
+          const sess = await api("POST", "/v1/posts/images", { mimeType: mime }, tok);
+          const headers = sess.headers || {};
+          const put = await fetch(sess.uploadUrl, { method: "PUT", headers, body: f });
+          if (!put.ok) throw new Error("图片上传失败");
+          keys.push(sess.objectKey);
+        }
+        const channelId = document.getElementById("channel").value || null;
+        const mentioned = document.getElementById("mention").value.trim();
+        const created = await api("POST", "/v1/posts", {
+          body: document.getElementById("body").value,
+          channelId,
+          mentionedVideoId: mentioned || null,
+          imageObjectKeys: keys
+        }, tok);
+        location.href = "/post/" + created.id;
+      } catch (err) { errEl.textContent = err.message; }
+    });
+    if (token()) hydrate(token()).catch(e => { errEl.textContent = e.message; });
+  </script>
+  <script src="/static/account.js"></script>
+</body>
+</html>

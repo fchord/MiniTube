@@ -1,0 +1,259 @@
+# Ranked GPU transcode workers. P1 and P3 may run at the same time on worker2
+# (NVENC and QSV are different engines). P4 stays Pending while worker1 is NotReady.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minitube-worker-nvenc-w2
+  namespace: minitube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minitube-worker
+      rank: "1"
+  template:
+    metadata:
+      labels:
+        app: minitube-worker
+        rank: "1"
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        kubernetes.io/hostname: k8s-worker2
+      containers:
+        - name: worker
+          image: minitube/worker-nvenc:local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: minitube
+            - secretRef:
+                name: minitube
+          env:
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,video,utility
+            - name: TRANSCODE_ENCODER
+              value: h264_nvenc
+            - name: TRANSCODE_PRESET
+              value: hq
+            - name: TRANSCODE_RANK
+              value: "1"
+            - name: TRANSCODE_MAX_HEIGHT
+              value: "1080"
+            - name: TRANSCODE_WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          command: ["/bin/sh", "-c"]
+          args:
+            - export DATABASE_URL="postgres://minitube:${POSTGRES_PASSWORD}@minitube-pg:5432/minitube?sslmode=disable"; exec /usr/local/bin/minitube-worker
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+              memory: 4Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: media
+              mountPath: /data
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: minitube-media
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minitube-worker-nvenc-master
+  namespace: minitube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minitube-worker
+      rank: "2"
+  template:
+    metadata:
+      labels:
+        app: minitube-worker
+        rank: "2"
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        kubernetes.io/hostname: k8s-master
+      containers:
+        - name: worker
+          image: minitube/worker-nvenc:local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: minitube
+            - secretRef:
+                name: minitube
+          env:
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,video,utility
+            - name: TRANSCODE_ENCODER
+              value: h264_nvenc
+            - name: TRANSCODE_PRESET
+              value: hq
+            - name: TRANSCODE_RANK
+              value: "2"
+            - name: TRANSCODE_MAX_HEIGHT
+              value: "720"
+            - name: TRANSCODE_WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          command: ["/bin/sh", "-c"]
+          args:
+            - export DATABASE_URL="postgres://minitube:${POSTGRES_PASSWORD}@minitube-pg:5432/minitube?sslmode=disable"; exec /usr/local/bin/minitube-worker
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+              memory: 2Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: media
+              mountPath: /data
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: minitube-media
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minitube-worker-qsv-w2
+  namespace: minitube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minitube-worker
+      rank: "3"
+  template:
+    metadata:
+      labels:
+        app: minitube-worker
+        rank: "3"
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s-worker2
+      securityContext:
+        supplementalGroups: [44, 109]
+      containers:
+        - name: worker
+          image: minitube/worker-qsv:local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: minitube
+            - secretRef:
+                name: minitube
+          env:
+            - name: TRANSCODE_ENCODER
+              value: h264_qsv
+            - name: LIBVA_DRIVER_NAME
+              value: iHD
+            - name: TRANSCODE_PRESET
+              value: medium
+            - name: TRANSCODE_RANK
+              value: "3"
+            - name: TRANSCODE_MAX_HEIGHT
+              value: "1080"
+            - name: TRANSCODE_WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          command: ["/bin/sh", "-c"]
+          args:
+            - export DATABASE_URL="postgres://minitube:${POSTGRES_PASSWORD}@minitube-pg:5432/minitube?sslmode=disable"; exec /usr/local/bin/minitube-worker
+          resources:
+            limits:
+              gpu.intel.com/i915: "1"
+              memory: 2Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+              gpu.intel.com/i915: "1"
+          volumeMounts:
+            - name: media
+              mountPath: /data
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: minitube-media
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minitube-worker-qsv-w1
+  namespace: minitube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minitube-worker
+      rank: "4"
+  template:
+    metadata:
+      labels:
+        app: minitube-worker
+        rank: "4"
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s-worker1
+      securityContext:
+        supplementalGroups: [44, 109]
+      containers:
+        - name: worker
+          image: minitube/worker-qsv:local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: minitube
+            - secretRef:
+                name: minitube
+          env:
+            - name: TRANSCODE_ENCODER
+              value: h264_vaapi
+            - name: LIBVA_DRIVER_NAME
+              value: i965
+            - name: TRANSCODE_RANK
+              value: "4"
+            - name: TRANSCODE_MAX_HEIGHT
+              value: "720"
+            - name: VAAPI_DEVICE
+              value: /dev/dri/renderD128
+            - name: TRANSCODE_WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          command: ["/bin/sh", "-c"]
+          args:
+            - export DATABASE_URL="postgres://minitube:${POSTGRES_PASSWORD}@minitube-pg:5432/minitube?sslmode=disable"; exec /usr/local/bin/minitube-worker
+          resources:
+            limits:
+              gpu.intel.com/i915: "1"
+              memory: 2Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+              gpu.intel.com/i915: "1"
+          volumeMounts:
+            - name: media
+              mountPath: /data
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: minitube-media

@@ -1,0 +1,90 @@
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+header .mt-nav { min-width: 0; flex: 1; }
+.account {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  padding: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #2a4a7a;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  line-height: 1;
+  letter-spacing: 0;
+  cursor: pointer;
+  text-decoration: none;
+  font-family: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.account.is-pending {
+  pointer-events: none;
+  cursor: default;
+  background: transparent;
+}
+.account img, .account-menu-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.account-menu {
+  position: fixed;
+  z-index: 50;
+  margin: 0;
+  padding: 6px 0;
+  width: max-content;
+  max-width: min(90vw, 320px);
+  background: #222;
+  color: #eee;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+}
+.account-menu[hidden] { display: none; }
+.account-menu-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 10px;
+}
+.account-menu-avatar {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #2a4a7a;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  line-height: 1;
+}
+.account-menu-name { font-weight: 600; }
+.account-menu-item {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  background: none;
+  border: 0;
+  color: #eee !important;
+  padding: 8px 12px;
+  cursor: pointer;
+  text-decoration: none;
+  font: inherit;
+}
+.account-menu-item:hover { background: #333; }

@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>短视频硬解路数 · MiniTube</title>
+  <link rel="stylesheet" href="/static/account.css"/>
+  <script src="/static/token.js"></script>
+  <script src="/static/media-edge.js"></script>
+  <style>
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0; min-height: 100%; background: #111; color: #eee;
+      font-family: system-ui, sans-serif;
+    }
+    header { padding: 12px 16px; }
+    header a { color: #8ab4ff; text-decoration: none; margin-right: 10px; }
+    h1 { font-size: 1.05rem; font-weight: 600; margin: 0 0 8px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      grid-template-rows: repeat(2, auto);
+      gap: 12px;
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 8px 16px 0;
+    }
+    .cell { min-width: 0; }
+    .stage {
+      position: relative;
+      width: 84%;
+      margin: 0 auto;
+      aspect-ratio: 9 / 16;
+      background: #000;
+      border: 3px solid #444;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .stage.ok { border-color: #2ecc71; }
+    .stage.bad { border-color: #e74c3c; }
+    .stage canvas {
+      display: block; width: 100%; height: 100%;
+      object-fit: contain; background: #000;
+    }
+    .fps {
+      position: absolute; right: 8px; bottom: 6px;
+      margin: 0;
+      color: #2ecc71;
+      font-size: 1.15rem;
+      font-weight: 600;
+      text-shadow: 0 1px 2px #000;
+      pointer-events: none;
+      z-index: 2;
+    }
+    .cap {
+      margin: 6px 0 0;
+      font-size: .82rem;
+      color: #ccc;
+      line-height: 1.35;
+      min-height: 2.6em;
+    }
+    .bar {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+      gap: 12px;
+      padding: 20px 16px 28px;
+    }
+    .bar button {
+      min-width: 88px; padding: 8px 16px;
+      border: 0; border-radius: 6px;
+      background: #2a5a9a; color: #fff; cursor: pointer; font-size: 1rem;
+    }
+    .bar button:disabled { opacity: .45; cursor: default; }
+    .bar .stop { background: #7a4a12; }
+    .bar .reset { background: #444; }
+    #count { font-size: 1.15rem; font-weight: 600; }
+    #err { color: #f88; text-align: center; min-height: 1.4em; margin: 0 16px 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/">MiniTube</a>
+    <a href="/shorts">短视频</a>
+    <h1>硬解路数测试 · demo1 · 1080p · 间隔 3 秒起播</h1>
+  </header>
+  <div class="grid" id="grid"></div>
+  <p id="err"></p>
+  <div class="bar">
+    <button id="btn-start" type="button">开始</button>
+    <button id="btn-stop" class="stop" type="button">停止</button>
+    <button id="btn-reset" class="reset" type="button">重置</button>
+    <span>当下正常硬件解码的路数：<span id="count">0</span></span>
+  </div>
+  <script type="module">
+    import { create } from "/static/shorts-hwtest.js";
+    const SLOTS = 10;
+    const GAP_MS = 3000;
+    const CHANNEL = "demo1";
+    const API = location.origin;
+    const grid = document.getElementById("grid");
+    const errEl = document.getElementById("err");
+    const countEl = document.getElementById("count");
+    const cells = [];
+    let clips = [];
+    let engine = null;
+    let startTimer = 0;
+    let nextSlot = 0;
+    let stopping = false;
+
+    function token() { return window.mtAuth && window.mtAuth.getToken(); }
+    function headers() {
+      const h = {};
+      const t = token();
+      if (t) h.Authorization = "Bearer " + t;
+      return h;
+    }
+    function sameOriginMedia(url) {
+      if (window.mtMedia && window.mtMedia.rewrite) return window.mtMedia.rewrite(url);
+      if (!url) return url;
+      try {
+        const u = new URL(url, location.origin);
+        const p = u.pathname || "";
+        if (p.indexOf("/v1/media/") === 0 || p.indexOf("/v1/live/") === 0) {
+          return location.origin + p + u.search + u.hash;
+        }
+      } catch (e) {}
+      return url;
+    }
+    async function getJSON(path) {
+      const r = await fetch(API + path, { headers: headers(), cache: "no-store" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.message || ("HTTP " + r.status));
+      return data;
+    }
+    function resLabel(v) {
+      const w = Number(v && v.width) || 0;
+      const h = Number(v && v.height) || 0;
+      if (w && h) return w + "×" + h;
+      return "分辨率未知";
+    }
+    for (let i = 0; i < SLOTS; i++) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      cell.innerHTML = '<div class="stage" id="stage-' + i + '"><canvas id="cv-' + i + '"></canvas><span class="fps" id="fps-' + i + '"></span></div>'
+        + '<p class="cap" id="cap-' + i + '">空闲</p>';
+      grid.appendChild(cell);
+      cells.push({
+        i: i,
+        stage: cell.querySelector(".stage"),
+        canvas: cell.querySelector("canvas"),
+        fpsEl: cell.querySelector(".fps"),
+        cap: cell.querySelector(".cap"),
+        clip: null,
+        pipeId: null
+      });
+    }
+
+    function paintStatus() {
+      let green = 0;
+      cells.forEach(function (c) {
+        const st = c.pipeId && engine ? engine.stateOf(c.pipeId) : "idle";
+        c.stage.classList.remove("ok", "bad");
+        if (st === "ok") {
+          c.stage.classList.add("ok");
+          green += 1;
+        } else if (st === "bad") {
+          c.stage.classList.add("bad");
+        }
+        if (c.fpsEl) {
+          const fps = c.pipeId && engine ? engine.fpsOf(c.pipeId) : 0;
+          c.fpsEl.textContent = fps > 0 ? fps.toFixed(1) : "";
+        }
+      });
+      countEl.textContent = String(engine ? engine.healthy() : green);
+    }
+
+    function makeEngine() {
+      return create({
+        getToken: token,
+        onStatus: paintStatus
+      });
+    }
+
+    async function playbackURL(id) {
+      const pb = await getJSON("/v1/videos/" + id + "/playback");
+      let best = pb.masterPlaylistUrl;
+      let h = -1;
+      (pb.renditions || []).forEach(function (r) {
+        const rh = Number(r.height) || 0;
+        if (rh >= h && r.playlistUrl) {
+          h = rh;
+          best = r.playlistUrl;
+        }
+      });
+      return sameOriginMedia(best);
+    }
+
+    async function loadClips() {
+      const data = await getJSON("/v1/channels/" + encodeURIComponent(CHANNEL) + "/videos?kind=short&limit=50");
+      const list = (data.items || []).slice();
+      list.sort(function (a, b) {
+        return (Number(b.height) || 0) - (Number(a.height) || 0);
+      });
+      const hi = list.filter(function (v) { return (Number(v.height) || 0) >= 1080; });
+      const pool = (hi.length ? hi : list).filter(function (v) { return v && v.id; });
+      if (!pool.length) throw new Error("demo1 没有短视频");
+      clips = [];
+      for (let i = 0; i < SLOTS; i++) clips.push(pool[i % pool.length]);
+    }
+
+    async function startSlot(i) {
+      const c = cells[i];
+      const clip = clips[i];
+      if (!c || !clip) return;
+      const pipeId = clip.id + "-" + i;
+      c.clip = clip;
+      c.pipeId = pipeId;
+      c.cap.textContent = (clip.title || clip.id) + " · " + resLabel(clip);
+      if (!engine) engine = makeEngine();
+      try {
+        const url = await playbackURL(clip.id);
+        if (stopping) return;
+        engine.open(pipeId, url, c.canvas);
+        paintStatus();
+      } catch (e) {
+        c.stage.classList.add("bad");
+        errEl.textContent = String((e && e.message) || e);
+      }
+    }
+
+    function scheduleNext() {
+      if (stopping || nextSlot >= SLOTS) return;
+      const i = nextSlot;
+      nextSlot += 1;
+      startSlot(i).catch(function (e) {
+        errEl.textContent = String((e && e.message) || e);
+      });
+      if (nextSlot < SLOTS) {
+        startTimer = setTimeout(scheduleNext, GAP_MS);
+      }
+    }
+
+    document.getElementById("btn-start").onclick = async function () {
+      stopping = false;
+      errEl.textContent = "";
+      try {
+        if (window.mtMedia && window.mtMedia.ready) await window.mtMedia.ready();
+        if (!clips.length) await loadClips();
+        if (!engine) engine = makeEngine();
+        if (nextSlot >= SLOTS) return;
+        if (startTimer) return;
+        scheduleNext();
+      } catch (e) {
+        errEl.textContent = String((e && e.message) || e);
+      }
+    };
+    document.getElementById("btn-stop").onclick = function () {
+      stopping = true;
+      if (startTimer) {
+        clearTimeout(startTimer);
+        startTimer = 0;
+      }
+    };
+    document.getElementById("btn-reset").onclick = function () {
+      stopping = true;
+      if (startTimer) {
+        clearTimeout(startTimer);
+        startTimer = 0;
+      }
+      nextSlot = 0;
+      if (engine) engine.closeAll();
+      engine = null;
+      cells.forEach(function (c) {
+        c.pipeId = null;
+        c.clip = null;
+        c.stage.classList.remove("ok", "bad");
+        const ctx = c.canvas.getContext("2d");
+        ctx.clearRect(0, 0, c.canvas.width, c.canvas.height);
+        c.canvas.width = 2;
+        c.canvas.height = 2;
+        if (c.fpsEl) c.fpsEl.textContent = "";
+        c.cap.textContent = "空闲";
+      });
+      countEl.textContent = "0";
+      errEl.textContent = "";
+    };
+    paintStatus();
+  </script>
+</body>
+</html>

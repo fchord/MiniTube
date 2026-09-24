@@ -1,0 +1,1883 @@
+openapi: 3.1.0
+info:
+  title: MiniTube API
+  version: 0.1.0
+  description: |
+    MiniTube HTTP 契约。
+
+    - Phase 1–2（MVP）：身份、频道、长视频点播、评论/点赞/收藏/观看记录。
+    - Phase 3：社交帖（发帖、时间线、评论/点赞）。
+    - Phase 4：短视频（`kind=short`，滑动 Feed）。
+    - Phase 5：直播（推流密钥、HLS、实时聊天、录播转点播）。
+    - 订阅对象始终是频道。内容类型由 `kind` 区分，不用宽高比。
+  license:
+    name: UNLICENSED
+
+servers:
+  - url: https://api.minitube.local/v1
+    description: 本地 / 开发
+
+tags:
+  - name: Auth
+  - name: Me
+  - name: Users
+  - name: Channels
+  - name: Videos
+  - name: Comments
+  - name: Social
+    description: Phase 3
+  - name: Live
+    description: Phase 5
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      security: []
+      summary: 用户名 + 邮箱注册，并创建默认频道与「稍后再看」
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: 已创建，需验证邮箱后方可发布内容
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      security: []
+      summary: 用户名或邮箱 + 密码登录
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: 撤销当前 refresh session
+      operationId: logout
+      responses:
+        "204":
+          description: 已登出
+
+  /auth/verify-email:
+    post:
+      tags: [Auth]
+      security: []
+      summary: 验证邮箱
+      operationId: verifyEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+      responses:
+        "204":
+          description: 已验证
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /me:
+    get:
+      tags: [Me]
+      summary: 当前用户资料
+      operationId: getMe
+      responses:
+        "200":
+          description: 当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPrivate"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    patch:
+      tags: [Me]
+      summary: 更新昵称、简介、用户名
+      operationId: updateMe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMeRequest"
+      responses:
+        "200":
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPrivate"
+
+  /me/avatar:
+    post:
+      tags: [Me]
+      summary: 获取头像直传 URL，或完成上传确认
+      operationId: upsertMyAvatar
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AvatarUploadRequest"
+      responses:
+        "200":
+          description: 预签名或已确认
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadSession"
+
+  /me/password:
+    put:
+      tags: [Me]
+      summary: 用原密码校验后设置新密码
+      operationId: changeMyPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "204":
+          description: 已更新
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /me/subscriptions:
+    get:
+      tags: [Me]
+      summary: 我订阅的频道
+      operationId: listMySubscriptions
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 频道分页
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelList"
+
+  /me/watch-history:
+    get:
+      tags: [Me]
+      summary: 观看记录（新近在前）
+      operationId: listWatchHistory
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 观看记录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WatchHistoryList"
+
+  /me/comments:
+    get:
+      tags: [Me]
+      summary: 我发表的评论
+      operationId: listMyComments
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 评论分页
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommentList"
+
+  /me/favorites:
+    get:
+      tags: [Me]
+      summary: 收藏夹列表（含系统「稍后再看」）
+      operationId: listFavoriteLists
+      responses:
+        "200":
+          description: 收藏夹
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FavoriteList"
+
+  /users/{username}:
+    get:
+      tags: [Users]
+      security: []
+      summary: 公开用户主页（含频道列表摘要）
+      operationId: getUser
+      parameters:
+        - $ref: "#/components/parameters/Username"
+      responses:
+        "200":
+          description: 公开资料
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPublic"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/{username}/channels:
+    get:
+      tags: [Users]
+      security: []
+      summary: 该用户拥有的频道
+      operationId: listUserChannels
+      parameters:
+        - $ref: "#/components/parameters/Username"
+      responses:
+        "200":
+          description: 频道列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelList"
+
+  /channels:
+    post:
+      tags: [Channels]
+      summary: 再开一个频道（注册时已有默认频道）
+      operationId: createChannel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChannelRequest"
+      responses:
+        "201":
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /channels/{handle}:
+    get:
+      tags: [Channels]
+      security: []
+      summary: 频道页
+      operationId: getChannel
+      parameters:
+        - $ref: "#/components/parameters/Handle"
+      responses:
+        "200":
+          description: 频道
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Channels]
+      summary: 编辑自己的频道
+      operationId: updateChannel
+      parameters:
+        - $ref: "#/components/parameters/Handle"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateChannelRequest"
+      responses:
+        "200":
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /channels/{handle}/videos:
+    get:
+      tags: [Channels]
+      security: []
+      summary: 频道下已发布视频
+      operationId: listChannelVideos
+      parameters:
+        - $ref: "#/components/parameters/Handle"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: kind
+          in: query
+          schema:
+            $ref: "#/components/schemas/VideoKind"
+          description: 不传则默认为 long
+      responses:
+        "200":
+          description: 视频分页
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoList"
+
+  /channels/{handle}/subscribe:
+    post:
+      tags: [Channels]
+      summary: 订阅该频道
+      operationId: subscribeChannel
+      parameters:
+        - $ref: "#/components/parameters/Handle"
+      responses:
+        "204":
+          description: 已订阅（幂等）
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Channels]
+      summary: 取消订阅
+      operationId: unsubscribeChannel
+      parameters:
+        - $ref: "#/components/parameters/Handle"
+      responses:
+        "204":
+          description: 已取消（幂等）
+
+  /videos:
+    post:
+      tags: [Videos]
+      summary: 创建视频元数据并返回源片直传 URL
+      operationId: createVideo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVideoRequest"
+      responses:
+        "201":
+          description: 草稿已建，等待直传
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateVideoResponse"
+
+  /videos/{videoId}:
+    get:
+      tags: [Videos]
+      security: []
+      summary: 视频详情（ready 且公开才对匿名可见）
+      operationId: getVideo
+      parameters:
+        - $ref: "#/components/parameters/VideoId"
+      responses:
+        "200":
+          description: 视频
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Video"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Videos]
+      summary: 更新标题、简介、定时发布、下架
+      operationId: updateVideo
+      parameters:
+        - $ref: "#/components/parameters/VideoId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateVideoRequest"
+      responses:
+        "200":
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Video"
+    delete:
+      tags: [Videos]
+      summary: 删除视频及媒体对象
+      operationId: deleteVideo
+      parameters:
+        - $ref: "#/components/parameters/VideoId"
+      responses:
+        "204":
+          description: 已删除
+
+  /videos/{videoId}/complete-upload:
+    post:
+      tags: [Videos]
+      summary: 源片直传完成，进入转码队列
+      operationId: completeVideoUpload
+      parameters:
+        - $ref: "#/components/parameters/VideoId"
+      responses:
+        "202":
+          description: 已受理，status=processing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Video"
+
+  /videos/{videoId}/playback:
+    get:
+      tags: [Videos]
+      security: []
+      summary: HLS 主播放列表与音轨/字幕组
+      operationId: getPlayback
+      parameters:
+        - $ref: "#/components/parameters/VideoId"
+      responses:
+        "200":
+          description: 播放清单
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Playback"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: 尚未 ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /videos/{videoId}/progress:
+    put:
+      tags: [Videos]
+      summary: 上报观看进度（合并进 watch_history）
+      operationId: putWatchProgress
+      parameters:
+        - $ref: "#/components/parameters/VideoId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WatchProgressRequest"
+      responses:
+        "204":
+          description: 已记录
+
+  /videos/{videoId}/like:
+    post:
+      tags: [Videos]
+      summary: 点赞
+      operationId: likeVideo
+      parameters:
+        - $ref: "#/components/parameters/VideoId"
+      responses:
+        "204":
+          description: 已点赞（幂等）
+    delete:
+      tags: [Videos]
+      summary: 取消点赞
+      operationId: unlikeVideo
+      parameters:
+        - $ref: "#/components/parameters/VideoId"
+      responses:
+        "204":
+          description: 已取消
+
+  /videos/{videoId}/comments:
+    get:
+      tags: [Comments]
+      security: []
+      summary: 视频评论（时间序分页）
+      operationId: listVideoComments
+      parameters:
+        - $ref: "#/components/parameters/VideoId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 评论
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommentList"
+    post:
+      tags: [Comments]
+      summary: 发表或回复评论
+      operationId: createVideoComment
+      parameters:
+        - $ref: "#/components/parameters/VideoId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCommentRequest"
+      responses:
+        "201":
+          description: 已发表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+
+  /favorites/{listId}/items:
+    get:
+      tags: [Me]
+      summary: 收藏夹内容
+      operationId: listFavoriteItems
+      parameters:
+        - $ref: "#/components/parameters/ListId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 条目
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FavoriteItemList"
+    post:
+      tags: [Me]
+      summary: 加入收藏（默认稍后再看可传系统 listId）
+      operationId: addFavoriteItem
+      parameters:
+        - $ref: "#/components/parameters/ListId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FavoriteItemInput"
+      responses:
+        "204":
+          description: 已加入（幂等）
+
+  /favorites/{listId}/items/{targetType}/{targetId}:
+    delete:
+      tags: [Me]
+      summary: 移出收藏
+      operationId: removeFavoriteItem
+      parameters:
+        - $ref: "#/components/parameters/ListId"
+        - name: targetType
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FavoriteTarget"
+        - name: targetId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: 已移除
+
+  /posts:
+    post:
+      tags: [Social]
+      summary: 发帖（需邮箱已验证）
+      operationId: createPost
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePostRequest"
+      responses:
+        "201":
+          description: 已发帖
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /posts/images:
+    post:
+      tags: [Social]
+      summary: 获取帖子配图直传 URL
+      operationId: beginPostImage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AvatarUploadRequest"
+      responses:
+        "200":
+          description: 预签名
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadSession"
+
+  /posts/{postId}:
+    get:
+      tags: [Social]
+      security: []
+      summary: 帖子详情
+      operationId: getPost
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 帖子
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Social]
+      summary: 删除自己的帖子
+      operationId: deletePost
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: 已删除
+
+  /posts/{postId}/like:
+    post:
+      tags: [Social]
+      summary: 点赞帖子
+      operationId: likePost
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: 已点赞
+    delete:
+      tags: [Social]
+      summary: 取消点赞
+      operationId: unlikePost
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: 已取消
+
+  /posts/{postId}/comments:
+    get:
+      tags: [Social]
+      security: []
+      summary: 帖子评论
+      operationId: listPostComments
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 评论
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommentList"
+    post:
+      tags: [Social]
+      summary: 评论帖子
+      operationId: createPostComment
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCommentRequest"
+      responses:
+        "201":
+          description: 已评论
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+
+  /users/{username}/posts:
+    get:
+      tags: [Social]
+      security: []
+      summary: 用户主页帖子时间线
+      operationId: listUserPosts
+      parameters:
+        - $ref: "#/components/parameters/Username"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 帖子列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostList"
+
+  /channels/{handle}/posts:
+    get:
+      tags: [Social]
+      security: []
+      summary: 频道页帖子时间线
+      operationId: listChannelPosts
+      parameters:
+        - $ref: "#/components/parameters/Handle"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 帖子列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostList"
+
+  /feed/posts:
+    get:
+      tags: [Social]
+      summary: 订阅频道的帖子时间线
+      operationId: listFeedPosts
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 帖子列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostList"
+
+  /public/site:
+    get:
+      tags: [Videos]
+      summary: 公开站点开关（短视频引擎、码流边缘）
+      operationId: getPublicSite
+      security: []
+      responses:
+        "200":
+          description: 站点开关
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shortsEngine:
+                    type: string
+                    enum: [legacy, webcodecs]
+                  mediaEdgeEnabled:
+                    type: boolean
+                  mediaEdges:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        base:
+                          type: string
+                        regions:
+                          type: array
+                          items:
+                            type: string
+                  mediaHint:
+                    type: string
+                    description: Cloudflare CF-IPCountry，如 CN；未知为空
+
+  /admin/site:
+    patch:
+      tags: [Videos]
+      summary: 管理员修改站点开关（/admin 口令+TOTP，或 ADMIN_USER_IDS）
+      operationId: patchAdminSite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                shortsEngine:
+                  type: string
+                  enum: [legacy, webcodecs]
+                mediaEdgeEnabled:
+                  type: boolean
+                mediaEdges:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      base:
+                        type: string
+                      regions:
+                        type: array
+                        items:
+                          type: string
+      responses:
+        "200":
+          description: 更新后的站点开关
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /feed/shorts:
+    get:
+      tags: [Videos]
+      summary: 短视频滑动 Feed
+      operationId: getShortsFeed
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: random
+          in: query
+          description: 为 1 时从公开短视频随机取片（发现页队列）。忽略 cursor。
+          schema:
+            type: string
+        - name: exclude
+          in: query
+          description: 逗号分隔的视频 id，随机模式下排除已在本次会话队列中的条目
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 短视频页
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoList"
+
+  /live:
+    post:
+      tags: [Live]
+      summary: 创建直播并颁发推流密钥（仅返回一次）
+      operationId: createLive
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLiveRequest"
+      responses:
+        "201":
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveStream"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      tags: [Live]
+      security: []
+      summary: 当前正在直播的公开频道
+      operationId: listLive
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 直播列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveList"
+
+  /live/{liveId}:
+    get:
+      tags: [Live]
+      security: []
+      summary: 直播详情
+      operationId: getLive
+      parameters:
+        - name: liveId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 直播
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveStream"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /live/{liveId}/end:
+    post:
+      tags: [Live]
+      summary: 结束直播（补 ENDLIST；HLS 仍可按原地址回看）
+      operationId: endLive
+      parameters:
+        - name: liveId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 已结束
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveStream"
+
+  /live/{liveId}/playback:
+    get:
+      tags: [Live]
+      security: []
+      summary: 直播 HLS 地址
+      operationId: getLivePlayback
+      parameters:
+        - name: liveId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 播放
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Playback"
+        "409":
+          description: 尚未开播或没有可回看的 HLS
+
+  /live/{liveId}/like:
+    post:
+      tags: [Live]
+      summary: 点赞直播
+      operationId: likeLive
+      parameters:
+        - name: liveId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: 已点赞
+    delete:
+      tags: [Live]
+      summary: 取消点赞
+      operationId: unlikeLive
+      parameters:
+        - name: liveId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: 已取消
+
+  /live/{liveId}/comments:
+    get:
+      tags: [Live]
+      security: []
+      summary: 直播聊天记录
+      operationId: listLiveComments
+      parameters:
+        - name: liveId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 评论
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommentList"
+    post:
+      tags: [Live]
+      summary: 发送直播评论
+      operationId: createLiveComment
+      parameters:
+        - name: liveId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCommentRequest"
+      responses:
+        "201":
+          description: 已发送
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+
+  /channels/{handle}/live:
+    get:
+      tags: [Live]
+      security: []
+      summary: 频道的直播列表
+      operationId: listChannelLive
+      parameters:
+        - $ref: "#/components/parameters/Handle"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 直播列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveList"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Username:
+      name: username
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 3
+        maxLength: 32
+    Handle:
+      name: handle
+      in: path
+      required: true
+      description: 频道 handle，不含 @
+      schema:
+        type: string
+        minLength: 3
+        maxLength: 32
+    VideoId:
+      name: videoId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 10
+        maxLength: 10
+        pattern: '^[A-Za-z0-9]{10}$'
+    ListId:
+      name: listId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 20
+
+  responses:
+    BadRequest:
+      description: 请求不合法
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: 未登录或令牌无效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: 无权限
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: 资源不存在或对当前身份不可见
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: 用户名 / 邮箱 / handle 冲突
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotImplemented:
+      description: 该 Phase 尚未开放
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          examples: [conflict, unauthenticated, not_ready, not_implemented]
+        message:
+          type: string
+
+    RegisterRequest:
+      type: object
+      required: [username, email, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 32
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+        nickname:
+          type: string
+          maxLength: 64
+
+    LoginRequest:
+      type: object
+      required: [identifier, password]
+      properties:
+        identifier:
+          type: string
+          description: 用户名或邮箱
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      required: [accessToken, refreshToken, user]
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        user:
+          $ref: "#/components/schemas/UserPrivate"
+
+    UserPublic:
+      type: object
+      required: [id, username, nickname, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        nickname:
+          type: string
+        avatarUrl:
+          type: [string, "null"]
+        bio:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    UserPrivate:
+      allOf:
+        - $ref: "#/components/schemas/UserPublic"
+        - type: object
+          required: [email, emailVerified, defaultChannel]
+          properties:
+            email:
+              type: string
+              format: email
+            emailVerified:
+              type: boolean
+            defaultChannel:
+              $ref: "#/components/schemas/Channel"
+
+    UpdateMeRequest:
+      type: object
+      properties:
+        nickname:
+          type: string
+        bio:
+          type: string
+        username:
+          type: string
+
+    AvatarUploadRequest:
+      type: object
+      properties:
+        mimeType:
+          type: string
+        complete:
+          type: boolean
+          description: true 时确认直传完成并写入 avatar_url
+
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 128
+
+    UploadSession:
+      type: object
+      required: [uploadUrl, objectKey]
+      properties:
+        uploadUrl:
+          type: string
+          format: uri
+        objectKey:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+
+    Channel:
+      type: object
+      required: [id, handle, name, visibility, isDefault, subscriberCount, ownerUsername]
+      properties:
+        id:
+          type: string
+          format: uuid
+        handle:
+          type: string
+        name:
+          type: string
+        avatarUrl:
+          type: [string, "null"]
+        bannerUrl:
+          type: [string, "null"]
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        visibility:
+          type: string
+          enum: [public, unlisted, private]
+        isDefault:
+          type: boolean
+        subscriberCount:
+          type: integer
+          format: int64
+        videoCount:
+          type: integer
+          format: int64
+          description: 仅 GET /channels/{handle} 返回，公开可见的长视频数（频道主含未发布）
+        shortCount:
+          type: integer
+          format: int64
+        liveCount:
+          type: integer
+          format: int64
+        postCount:
+          type: integer
+          format: int64
+        subscribed:
+          type: boolean
+          description: 当前用户是否已订阅；匿名省略或 false
+        ownerUsername:
+          type: string
+
+    ChannelList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Channel"
+        nextCursor:
+          type: [string, "null"]
+
+    CreateChannelRequest:
+      type: object
+      required: [name, handle]
+      properties:
+        name:
+          type: string
+        handle:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    UpdateChannelRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        visibility:
+          type: string
+          enum: [public, unlisted, private]
+        isDefault:
+          type: boolean
+          description: true 时将该频道设为默认（取消原默认）
+
+    VideoKind:
+      type: string
+      enum: [long, short]
+      description: 业务类型。Phase 2 客户端只创建 long。
+
+    VideoStatus:
+      type: string
+      enum: [draft, uploading, processing, ready, failed, unpublished]
+
+    Video:
+      type: object
+      required: [id, channel, kind, title, status, createdAt]
+      properties:
+        id:
+          type: string
+          minLength: 10
+          maxLength: 10
+          pattern: '^[A-Za-z0-9]{10}$'
+        channel:
+          $ref: "#/components/schemas/Channel"
+        kind:
+          $ref: "#/components/schemas/VideoKind"
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          $ref: "#/components/schemas/VideoStatus"
+        durationMs:
+          type: [integer, "null"]
+        width:
+          type: [integer, "null"]
+        height:
+          type: [integer, "null"]
+        aspectRatio:
+          type: [number, "null"]
+          description: 仅呈现提示，禁止用其判断 kind
+        thumbnailUrl:
+          type: [string, "null"]
+        viewCount:
+          type: integer
+          format: int64
+        likeCount:
+          type: integer
+          format: int64
+        commentCount:
+          type: integer
+          format: int64
+        liked:
+          type: boolean
+        publishedAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    VideoList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Video"
+        nextCursor:
+          type: [string, "null"]
+
+    CreateVideoRequest:
+      type: object
+      required: [channelId, title]
+      properties:
+        channelId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        kind:
+          $ref: "#/components/schemas/VideoKind"
+          default: long
+        mimeType:
+          type: string
+          description: 源片 MIME，用于预签名
+        filename:
+          type: string
+
+    CreateVideoResponse:
+      type: object
+      required: [video, upload]
+      properties:
+        video:
+          $ref: "#/components/schemas/Video"
+        upload:
+          $ref: "#/components/schemas/UploadSession"
+
+    UpdateVideoRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [unpublished, ready]
+        scheduledAt:
+          type: [string, "null"]
+          format: date-time
+
+    Playback:
+      type: object
+      required: [masterPlaylistUrl, renditions, audioTracks, subtitleTracks]
+      properties:
+        masterPlaylistUrl:
+          type: string
+          format: uri
+        renditions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Rendition"
+        audioTracks:
+          type: array
+          items:
+            $ref: "#/components/schemas/AudioTrack"
+        subtitleTracks:
+          type: array
+          items:
+            $ref: "#/components/schemas/SubtitleTrack"
+
+    Rendition:
+      type: object
+      required: [height, bandwidthBps, playlistUrl]
+      properties:
+        height:
+          type: integer
+        bandwidthBps:
+          type: integer
+        playlistUrl:
+          type: string
+          format: uri
+        codec:
+          type: string
+
+    AudioTrack:
+      type: object
+      required: [language, label, playlistUrl, isDefault]
+      properties:
+        language:
+          type: string
+        label:
+          type: string
+        playlistUrl:
+          type: string
+          format: uri
+        isDefault:
+          type: boolean
+
+    SubtitleTrack:
+      type: object
+      required: [language, label, vttUrl, isDefault]
+      properties:
+        language:
+          type: string
+        label:
+          type: string
+        vttUrl:
+          type: string
+          format: uri
+        isDefault:
+          type: boolean
+
+    WatchProgressRequest:
+      type: object
+      required: [positionMs]
+      properties:
+        positionMs:
+          type: integer
+          minimum: 0
+        durationMs:
+          type: integer
+        completed:
+          type: boolean
+
+    WatchHistoryItem:
+      type: object
+      required: [video, positionMs, lastWatchedAt]
+      properties:
+        video:
+          $ref: "#/components/schemas/Video"
+        positionMs:
+          type: integer
+        durationMs:
+          type: [integer, "null"]
+        completed:
+          type: boolean
+        lastWatchedAt:
+          type: string
+          format: date-time
+
+    WatchHistoryList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/WatchHistoryItem"
+        nextCursor:
+          type: [string, "null"]
+
+    CreateCommentRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        parentId:
+          type: [string, "null"]
+          format: uuid
+
+    Comment:
+      type: object
+      required: [id, user, targetType, targetId, body, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user:
+          $ref: "#/components/schemas/UserPublic"
+        targetType:
+          type: string
+          enum: [video, post, live]
+        targetId:
+          type: string
+          format: uuid
+        parentId:
+          type: [string, "null"]
+          format: uuid
+        body:
+          type: string
+        likeCount:
+          type: integer
+          format: int64
+        createdAt:
+          type: string
+          format: date-time
+
+    CommentList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Comment"
+        nextCursor:
+          type: [string, "null"]
+
+    FavoriteList:
+      type: object
+      required: [id, kind, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [watch_later, custom]
+        name:
+          type: string
+
+    FavoriteTarget:
+      type: string
+      enum: [video, post, live]
+
+    FavoriteItemInput:
+      type: object
+      required: [targetType, targetId]
+      properties:
+        targetType:
+          $ref: "#/components/schemas/FavoriteTarget"
+        targetId:
+          type: string
+          format: uuid
+
+    FavoriteItem:
+      type: object
+      required: [targetType, targetId, createdAt]
+      properties:
+        targetType:
+          $ref: "#/components/schemas/FavoriteTarget"
+        targetId:
+          type: string
+          format: uuid
+        video:
+          description: targetType=video 时展开
+          $ref: "#/components/schemas/Video"
+        createdAt:
+          type: string
+          format: date-time
+
+    FavoriteItemList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FavoriteItem"
+        nextCursor:
+          type: [string, "null"]
+
+    CreatePostRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          maxLength: 2000
+        channelId:
+          type: [string, "null"]
+          format: uuid
+        mentionedVideoId:
+          type: [string, "null"]
+          minLength: 10
+          maxLength: 10
+          pattern: '^[A-Za-z0-9]{10}$'
+        imageObjectKeys:
+          type: array
+          maxItems: 9
+          items:
+            type: string
+
+    Post:
+      type: object
+      required: [id, author, body, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        author:
+          $ref: "#/components/schemas/UserPublic"
+        channel:
+          $ref: "#/components/schemas/Channel"
+        body:
+          type: string
+        imageUrls:
+          type: array
+          items:
+            type: string
+            format: uri
+        mentionedVideoId:
+          type: [string, "null"]
+          minLength: 10
+          maxLength: 10
+          pattern: '^[A-Za-z0-9]{10}$'
+        likeCount:
+          type: integer
+          format: int64
+        commentCount:
+          type: integer
+          format: int64
+        liked:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    PostList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Post"
+
+    CreateLiveRequest:
+      type: object
+      required: [channelId, title]
+      properties:
+        channelId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        scheduledAt:
+          type: [string, "null"]
+          format: date-time
+
+    LiveStream:
+      type: object
+      required: [id, channel, title, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        channel:
+          $ref: "#/components/schemas/Channel"
+        title:
+          type: string
+        status:
+          type: string
+          enum: [scheduled, live, ended]
+        playbackUrl:
+          type: [string, "null"]
+          format: uri
+        thumbnailUrl:
+          type: [string, "null"]
+          format: uri
+          description: 从直播画面抽取的封面，规格与点播缩略图相同
+        ingestUrl:
+          type: string
+          description: 仅创建者可见
+        ingestKey:
+          type: string
+          description: 仅创建响应返回一次
+        vodVideoId:
+          type: [string, "null"]
+          format: uuid
+        likeCount:
+          type: integer
+          format: int64
+        liked:
+          type: boolean
+        description:
+          type: string
+        scheduledAt:
+          type: [string, "null"]
+          format: date-time
+        startedAt:
+          type: [string, "null"]
+          format: date-time
+        endedAt:
+          type: [string, "null"]
+          format: date-time
+
+    LiveList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LiveStream"

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>正在直播 · MiniTube</title>
+  <link rel="stylesheet" href="/static/account.css"/>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+    header { padding: 12px 16px; background: #1a1a1a; }
+    header a { color: #8ab4ff; text-decoration: none; }
+    main { max-width: 720px; margin: 0 auto; padding: 16px; }
+    .card { background: #1a1a1a; padding: 12px 16px; margin: 12px 0; border-radius: 8px; }
+    a { color: #8ab4ff; text-decoration: none; }
+    .meta { color: #aaa; font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <header><a href="/">MiniTube</a> · <a href="/live">直播</a> · <a href="/shorts">短视频</a> · <a href="/compose">发帖</a> · <a href="/feed">时间线</a></header>
+  <main>
+    <h1>正在直播</h1>
+    <div id="list"></div>
+    <p class="meta" id="empty">加载中…</p>
+  </main>
+  <script>
+    const API = location.origin;
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    }
+    fetch(API + "/v1/live").then(r => r.json()).then(data => {
+      const items = data.items || [];
+      document.getElementById("empty").textContent = items.length ? "" : "现在没有直播。创建后用 OBS / ffmpeg 推流到 rtmp://主机:1935/live/{密钥}。";
+      const list = document.getElementById("list");
+      items.forEach(l => {
+        list.insertAdjacentHTML("beforeend", `<div class="card"><a href="/live/${esc(l.id)}">${esc(l.title)}</a><div class="meta">${l.channel ? "@" + esc(l.channel.handle) : ""}</div></div>`);
+      });
+    }).catch(() => { document.getElementById("empty").textContent = "加载失败"; });
+  </script>
+  <script src="/static/account.js"></script>
+</body>
+</html>

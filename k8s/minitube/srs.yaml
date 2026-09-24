@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: minitube-srs
+  namespace: minitube
+spec:
+  ports:
+    - name: rtmp
+      port: 1935
+      targetPort: 1935
+    - name: api
+      port: 1985
+      targetPort: 1985
+  selector:
+    app: minitube-srs
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minitube-srs
+  namespace: minitube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minitube-srs
+  template:
+    metadata:
+      labels:
+        app: minitube-srs
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s-master
+      containers:
+        - name: srs
+          image: registry.cn-hangzhou.aliyuncs.com/ossrs/srs:5
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SRS_HOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: minitube
+                  key: SRS_HOOK_SECRET
+          command: ["/bin/sh", "-c"]
+          args:
+            - sed "s/SRS_HOOK_SECRET/${SRS_HOOK_SECRET}/g" /cfg/srs.conf > /tmp/srs.conf && exec ./objs/srs -c /tmp/srs.conf
+          ports:
+            - containerPort: 1935
+              hostPort: 1935
+            - containerPort: 1985
+          volumeMounts:
+            - name: cfg
+              mountPath: /cfg
+              readOnly: true
+            - name: media
+              mountPath: /data
+      volumes:
+        - name: cfg
+          configMap:
+            name: minitube-srs
+        - name: media
+          persistentVolumeClaim:
+            claimName: minitube-media

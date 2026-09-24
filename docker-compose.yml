@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: minitube
+      POSTGRES_PASSWORD: minitube
+      POSTGRES_DB: minitube
+    ports:
+      - "5433:5432"
+    volumes:
+      - minitube_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minitube -d minitube"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  srs:
+    image: registry.cn-hangzhou.aliyuncs.com/ossrs/srs:5
+    command: ["./objs/srs", "-c", "conf/docker.conf"]
+    ports:
+      - "1935:1935"
+      - "127.0.0.1:1985:1985"
+    volumes:
+      - ./srs.conf:/usr/local/srs/conf/docker.conf:ro
+      - ./api/data/srs-hls:/data/srs-hls
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  minitube_pg:

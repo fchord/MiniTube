@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>登录 · MiniTube</title>
+  <link rel="stylesheet" href="/static/account.css"/>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+    header { padding: 12px 16px; background: #1a1a1a; }
+    header a { color: #8ab4ff; text-decoration: none; }
+    main { max-width: 400px; margin: 0 auto; padding: 24px 16px; }
+    label, input, button { display: block; width: 100%; margin: 8px 0; box-sizing: border-box; }
+    input { background: #1a1a1a; color: #eee; border: 1px solid #333; padding: 10px; border-radius: 6px; }
+    button { background: #3b6; color: #111; border: 0; padding: 10px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    .err { color: #f88; }
+    .meta { color: #aaa; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <header><a href="/">MiniTube</a></header>
+  <main>
+    <h1>登录</h1>
+    <form id="form">
+      <label>用户名或邮箱
+        <input id="ident" name="identifier" autocomplete="username" required/>
+      </label>
+      <label>密码
+        <input id="pass" name="password" type="password" autocomplete="current-password" required/>
+      </label>
+      <button type="submit">登录</button>
+    </form>
+    <p class="meta">还没有账号？<a href="/register">注册</a></p>
+    <p class="err" id="err"></p>
+  </main>
+  <script>
+    const errEl = document.getElementById("err");
+    function safeNext() {
+      const n = new URLSearchParams(location.search).get("next") || "/";
+      if (!n.startsWith("/") || n.startsWith("//")) return "/";
+      return n;
+    }
+    if (window.mtAuth.getToken()) location.replace(safeNext());
+    document.getElementById("form").addEventListener("submit", async e => {
+      e.preventDefault();
+      errEl.textContent = "";
+      const r = await fetch("/v1/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          identifier: document.getElementById("ident").value,
+          password: document.getElementById("pass").value
+        })
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { errEl.textContent = data.message || "登录失败"; return; }
+      window.mtAuth.setToken(data.accessToken);
+      location.href = safeNext();
+    });
+  </script>
+  <script src="/static/account.js"></script>
+</body>
+</html>

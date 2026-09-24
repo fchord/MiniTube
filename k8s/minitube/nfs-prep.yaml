@@ -1,0 +1,72 @@
+# Privileged prep: nfs-common on every node; kernel NFS export on k8s-worker2.
+# Media lives at hostPath /data/minitube on worker2, shared as NFS to API/workers/SRS.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: minitube-nfs-prep
+  namespace: minitube
+  labels:
+    app: minitube-nfs-prep
+spec:
+  selector:
+    matchLabels:
+      app: minitube-nfs-prep
+  template:
+    metadata:
+      labels:
+        app: minitube-nfs-prep
+    spec:
+      hostNetwork: true
+      hostPID: true
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: prep
+          image: debian:12-slim
+          securityContext:
+            privileged: true
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          command:
+            - nsenter
+            - -t
+            - "1"
+            - -m
+            - -u
+            - -i
+            - -n
+            - --
+            - bash
+            - -lc
+            - |
+              set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              if ! dpkg -s nfs-common >/dev/null 2>&1; then
+                apt-get update -qq
+                apt-get install -y -qq nfs-common
+              fi
+              if [ "${NODE_NAME}" = "k8s-worker2" ]; then
+                if ! dpkg -s nfs-kernel-server >/dev/null 2>&1; then
+                  apt-get update -qq
+                  apt-get install -y -qq nfs-kernel-server
+                fi
+                mkdir -p /data/minitube/uploads /data/minitube/srs-hls /data/minitube/live-hls
+                chmod 777 /data/minitube /data/minitube/uploads /data/minitube/srs-hls /data/minitube/live-hls
+                if ! grep -q '^/data/minitube ' /etc/exports 2>/dev/null; then
+                  echo '/data/minitube 192.168.43.0/24(rw,sync,no_subtree_check,no_root_squash)' >> /etc/exports
+                fi
+                exportfs -ra
+                systemctl enable nfs-server >/dev/null 2>&1 || true
+                systemctl restart nfs-kernel-server 2>/dev/null || systemctl restart nfs-server
+                exportfs -v
+                showmount -e 127.0.0.1 || true
+              fi
+              echo "nfs-prep ready on ${NODE_NAME}"
+              sleep infinity
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi

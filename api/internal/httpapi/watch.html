@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>MiniTube</title>
+  <link rel="stylesheet" href="/static/account.css"/>
+  <link rel="stylesheet" href="/static/player.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js"></script>
+  <script src="/static/token.js"></script>
+  <script src="/static/media-edge.js"></script>
+  <script src="/static/player.js"></script>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+    header { padding: 12px 16px; background: #1a1a1a; }
+    header a { color: #8ab4ff; text-decoration: none; }
+    main { max-width: 960px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 1.25rem; font-weight: 600; }
+    .meta { color: #aaa; font-size: .9rem; }
+    .err { color: #f88; }
+    @media (max-width: 640px) {
+      main { max-width: none; padding: 0 0 16px; }
+      h1 { padding: 12px 16px 0; margin: 0; }
+      .meta, .err { padding: 0 16px; }
+    }
+  </style>
+</head>
+<body>
+  <header><a href="/">MiniTube</a> · <a href="/live">直播</a> · <a href="/shorts">短视频</a> · <a href="/compose">发帖</a> · <a href="/feed">时间线</a></header>
+  <main>
+    <div id="player"></div>
+    <h1 id="title">加载中…</h1>
+    <p class="meta" id="meta"></p>
+    <p class="err" id="err"></p>
+  </main>
+  <script>
+    const VIDEO_ID = "__VIDEO_ID__";
+    const API = location.origin;
+    const errEl = document.getElementById("err");
+    function token() { return window.mtAuth && window.mtAuth.getToken(); }
+    function headers() {
+      const h = {};
+      if (token()) h.Authorization = "Bearer " + token();
+      return h;
+    }
+    async function getJSON(path) {
+      const r = await fetch(API + path, { headers: headers(), cache: "no-store" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.message || "视频不可用");
+      return data;
+    }
+
+    async function main() {
+      if (window.mtMedia && window.mtMedia.ready) await window.mtMedia.ready();
+      const meta = await getJSON("/v1/videos/" + VIDEO_ID);
+      if (meta.kind === "short") { location.replace("/shorts/" + VIDEO_ID); return; }
+      document.getElementById("title").textContent = meta.title || "未命名";
+      document.title = (meta.title || "MiniTube") + " · MiniTube";
+      document.getElementById("meta").textContent =
+        (meta.channel && meta.channel.name ? meta.channel.name : "") +
+        (meta.durationMs ? " · " + Math.round(meta.durationMs / 1000) + "s" : "");
+      const pb = await getJSON("/v1/videos/" + VIDEO_ID + "/playback");
+      const player = window.mtPlayer.mount(document.getElementById("player"));
+      player.load({
+        src: pb.masterPlaylistUrl,
+        poster: meta.thumbnailUrl || "",
+        renditions: pb.renditions || [],
+        width: meta.width || 0,
+        height: meta.height || 0
+      });
+    }
+    main().catch(e => { errEl.textContent = e.message; });
+  </script>
+  <script src="/static/account.js"></script>
+</body>
+</html>

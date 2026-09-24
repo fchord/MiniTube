@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>MiniTube</title>
+  <link rel="stylesheet" href="/static/post-media.css"/>
+  <link rel="stylesheet" href="/static/account.css"/>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+    header { padding: 12px 16px; background: #1a1a1a; }
+    header a { color: #8ab4ff; text-decoration: none; }
+    main { max-width: 720px; margin: 0 auto; padding: 16px; }
+    .card { background: #1a1a1a; padding: 12px 16px; margin: 12px 0; border-radius: 8px; }
+    .meta { color: #aaa; font-size: .85rem; }
+    .err { color: #f88; }
+    h1 { font-size: 1.3rem; }
+  </style>
+</head>
+<body>
+  <header><a href="/">MiniTube</a> · <a href="/live">直播</a> · <a href="/shorts">短视频</a> · <a href="/compose">发帖</a> · <a href="/feed">时间线</a></header>
+  <main>
+    <h1 id="title">加载中…</h1>
+    <p class="meta" id="meta"></p>
+    <div id="list"></div>
+    <p class="err" id="err"></p>
+  </main>
+  <script src="/static/post-media.js"></script>
+  <script>
+    const SLOT = "__SLOT__";
+    const API = location.origin;
+    const errEl = document.getElementById("err");
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    }
+    function postCard(p) {
+      const mention = p.mentionedVideoId ? ` · <a href="/watch/${esc(p.mentionedVideoId)}">视频</a>` : "";
+      const ch = p.channel ? ` · @${esc(p.channel.handle)}` : "";
+      return `<article class="card"><div class="meta">${esc(p.author.nickname || p.author.username)}${ch} · <a href="/post/${esc(p.id)}">打开</a>${mention}</div><p>${esc(p.body)}</p>${renderPostImages(p.imageUrls)}</article>`;
+    }
+    async function main() {
+      const u = await fetch(API + "/v1/users/" + encodeURIComponent(SLOT)).then(r => { if (!r.ok) throw new Error("用户不存在"); return r.json(); });
+      document.getElementById("title").textContent = u.nickname || u.username;
+      document.title = u.username + " · MiniTube";
+      const chs = await fetch(API + "/v1/users/" + encodeURIComponent(SLOT) + "/channels").then(r => r.json());
+      const posts = await fetch(API + "/v1/users/" + encodeURIComponent(SLOT) + "/posts").then(r => r.json());
+      document.getElementById("meta").textContent = "@" + u.username;
+      const list = document.getElementById("list");
+      (chs.items || []).forEach(c => {
+        list.insertAdjacentHTML("beforeend", `<div class="card"><a href="/c/${esc(c.handle)}">频道 @${esc(c.handle)}</a> · ${esc(c.name)}</div>`);
+      });
+      (posts.items || []).forEach(p => { list.insertAdjacentHTML("beforeend", postCard(p)); });
+    }
+    main().catch(e => { errEl.textContent = e.message; });
+  </script>
+  <script src="/static/account.js"></script>
+</body>
+</html>

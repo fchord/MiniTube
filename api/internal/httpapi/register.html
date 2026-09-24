@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>注册 · MiniTube</title>
+  <link rel="stylesheet" href="/static/account.css"/>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+    header { padding: 12px 16px; background: #1a1a1a; }
+    header a { color: #8ab4ff; text-decoration: none; }
+    main { max-width: 400px; margin: 0 auto; padding: 24px 16px; }
+    label, input, button { display: block; width: 100%; margin: 8px 0; box-sizing: border-box; }
+    input { background: #1a1a1a; color: #eee; border: 1px solid #333; padding: 10px; border-radius: 6px; }
+    button { background: #3b6; color: #111; border: 0; padding: 10px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    .err { color: #f88; }
+    .ok { color: #8c8; }
+    .meta { color: #aaa; font-size: .9rem; }
+    .hint { color: #888; font-size: .8rem; font-weight: 400; }
+  </style>
+</head>
+<body>
+  <header><a href="/">MiniTube</a></header>
+  <main>
+    <h1>注册</h1>
+    <form id="form">
+      <label>用户名
+        <span class="hint">3–32 位，字母开头，只能含字母数字下划线</span>
+        <input id="username" name="username" autocomplete="username" required minlength="3" maxlength="32"/>
+      </label>
+      <label>邮箱
+        <input id="email" name="email" type="email" autocomplete="email" required/>
+      </label>
+      <label>昵称 <span class="hint">可选，默认等于用户名</span>
+        <input id="nickname" name="nickname" maxlength="64"/>
+      </label>
+      <label>密码
+        <span class="hint">至少 8 位</span>
+        <input id="pass" name="password" type="password" autocomplete="new-password" required minlength="8"/>
+      </label>
+      <button type="submit">注册</button>
+    </form>
+    <form id="verify" hidden>
+      <p class="ok">账号已创建。请验证邮箱（开发环境看 API 日志里的 token）。</p>
+      <label>验证码
+        <input id="vtoken" name="token" autocomplete="one-time-code"/>
+      </label>
+      <button type="submit">验证邮箱</button>
+      <p class="meta"><a href="/">先去首页</a></p>
+    </form>
+    <p class="meta" id="loginLink">已有账号？<a href="/login">登录</a></p>
+    <p class="err" id="err"></p>
+  </main>
+  <script>
+    const errEl = document.getElementById("err");
+    document.getElementById("form").addEventListener("submit", async e => {
+      e.preventDefault();
+      errEl.textContent = "";
+      const body = {
+        username: document.getElementById("username").value,
+        email: document.getElementById("email").value,
+        password: document.getElementById("pass").value
+      };
+      const nick = document.getElementById("nickname").value.trim();
+      if (nick) body.nickname = nick;
+      const r = await fetch("/v1/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { errEl.textContent = data.message || "注册失败"; return; }
+      window.mtAuth.setToken(data.accessToken);
+      document.getElementById("form").hidden = true;
+      document.getElementById("loginLink").hidden = true;
+      document.getElementById("verify").hidden = false;
+    });
+    document.getElementById("verify").addEventListener("submit", async e => {
+      e.preventDefault();
+      errEl.textContent = "";
+      const r = await fetch("/v1/auth/verify-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: document.getElementById("vtoken").value })
+      });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        errEl.textContent = data.message || "验证失败";
+        return;
+      }
+      location.href = "/";
+    });
+  </script>
+  <script src="/static/account.js"></script>
+</body>
+</html>

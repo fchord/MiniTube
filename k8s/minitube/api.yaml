@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: minitube-api
+  namespace: minitube
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30808
+    - name: media-tls
+      port: 18080
+      targetPort: 18080
+      nodePort: 31808
+  selector:
+    app: minitube-api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minitube-api
+  namespace: minitube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minitube-api
+  template:
+    metadata:
+      labels:
+        app: minitube-api
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s-master
+      containers:
+        - name: api
+          image: minitube/api:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              hostPort: 8080
+            - containerPort: 18080
+              hostPort: 18080
+          envFrom:
+            - configMapRef:
+                name: minitube
+            - secretRef:
+                name: minitube
+          env:
+            - name: DATABASE_URL
+              value: postgres://minitube:$(POSTGRES_PASSWORD)@minitube-pg:5432/minitube?sslmode=disable
+          # Kubernetes does not expand $(POSTGRES_PASSWORD) from another env var
+          # in DATABASE_URL. Use a computed URL from the secret instead.
+          command: ["/bin/sh", "-c"]
+          args:
+            - export DATABASE_URL="postgres://minitube:${POSTGRES_PASSWORD}@minitube-pg:5432/minitube?sslmode=disable"; exec /usr/local/bin/minitube-api
+          volumeMounts:
+            - name: media
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            timeoutSeconds: 3
+            periodSeconds: 5
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: minitube-media

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>设置 · MiniTube</title>
+  <link rel="stylesheet" href="/static/account.css"/>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+    header { padding: 12px 16px; background: #1a1a1a; }
+    header a, main a { color: #8ab4ff; text-decoration: none; }
+    main { max-width: 560px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 1.4rem; }
+    h2 { font-size: 1.05rem; margin: 1.6em 0 .6em; }
+    label { display: block; margin: 10px 0; }
+    label > span { display: block; color: #aaa; font-size: .9rem; margin-bottom: 4px; }
+    input, textarea, button { display: block; width: 100%; margin: 0; box-sizing: border-box; }
+    input, textarea { background: #1a1a1a; color: #eee; border: 1px solid #333; padding: 10px; border-radius: 6px; }
+    input[readonly] { color: #ccc; background: #181818; }
+    textarea { min-height: 6em; resize: vertical; }
+    button { background: #3b6; color: #111; border: 0; padding: 10px; border-radius: 6px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+    button.secondary { background: #333; color: #eee; width: auto; padding: 8px 12px; }
+    .err { color: #f88; min-height: 1.2em; }
+    .ok { color: #8d8; }
+    .meta { color: #aaa; font-size: .9rem; }
+    .avatar-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 8px 0 16px; }
+    .avatar-preview {
+      width: 6em; height: 6em; border-radius: 8px; overflow: hidden;
+      background: #222; border: 1px solid #333; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      color: #888; font-size: .85rem;
+    }
+    .avatar-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ch-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(8em, 1fr));
+      gap: 8px 16px;
+    }
+    .ch-grid a { display: block; padding: 8px 10px; background: #1a1a1a; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/">MiniTube</a> · <a href="/live">直播</a> · <a href="/shorts">短视频</a> · <a href="/compose">发帖</a> · <a href="/feed">时间线</a>
+  </header>
+  <main>
+    <h1>设置</h1>
+    <p class="err" id="err"></p>
+    <p class="ok" id="ok"></p>
+
+    <h2>头像</h2>
+    <div class="avatar-wrap">
+      <div class="avatar-preview" id="avatarBox" title="点击选择图片">点击上传</div>
+      <input id="avatarFile" type="file" accept="image/jpeg,image/png" hidden/>
+      <button type="button" class="secondary" id="avatarPick">选择 jpg/png</button>
+    </div>
+
+    <h2>账号</h2>
+    <form id="profile">
+      <label><span>邮箱</span><input id="email" readonly/></label>
+      <p class="meta" id="emailVerified"></p>
+      <label><span>用户名</span><input id="username" readonly/></label>
+      <label><span>内部 ID</span><input id="userId" readonly/></label>
+      <label><span>注册时间</span><input id="createdAt" readonly/></label>
+      <label><span>昵称</span><input id="nickname" maxlength="64"/></label>
+      <label><span>简介</span><textarea id="bio" maxlength="2000"></textarea></label>
+      <button type="submit">保存资料</button>
+    </form>
+
+    <h2>频道</h2>
+    <div class="ch-grid" id="channels"></div>
+
+    <h2>密码</h2>
+    <form id="password">
+      <label><span>原密码</span><input id="currentPassword" type="password" autocomplete="current-password" required/></label>
+      <label><span>新密码</span><input id="newPassword" type="password" autocomplete="new-password" required minlength="8" maxlength="128"/></label>
+      <label><span>再输入一次新密码</span><input id="newPassword2" type="password" autocomplete="new-password" required minlength="8" maxlength="128"/></label>
+      <button type="submit">修改密码</button>
+    </form>
+  </main>
+  <script>
+    const errEl = document.getElementById("err");
+    const okEl = document.getElementById("ok");
+    function token() { return window.mtAuth.getToken(); }
+    function flash(ok, msg) {
+      errEl.textContent = ok ? "" : (msg || "");
+      okEl.textContent = ok ? (msg || "") : "";
+    }
+    async function api(method, path, body) {
+      const headers = { "Content-Type": "application/json" };
+      const tok = token();
+      if (tok) headers.Authorization = "Bearer " + tok;
+      const r = await fetch(path, { method, headers, body: body == null ? undefined : JSON.stringify(body) });
+      const text = await r.text();
+      let data = {};
+      try { data = text ? JSON.parse(text) : {}; } catch {}
+      if (r.status === 401) {
+        window.mtAuth.clearToken();
+        location.replace("/login?next=/settings");
+        throw new Error("请先登录");
+      }
+      if (!r.ok) throw new Error(data.message || ("HTTP " + r.status));
+      return data;
+    }
+    function cropSquare(file) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          const side = Math.min(img.width, img.height);
+          const sx = (img.width - side) / 2;
+          const sy = (img.height - side) / 2;
+          const out = Math.min(Math.max(side, 1), 512);
+          const canvas = document.createElement("canvas");
+          canvas.width = out;
+          canvas.height = out;
+          canvas.getContext("2d").drawImage(img, sx, sy, side, side, 0, 0, out, out);
+          const mime = file.type === "image/png" ? "image/png" : "image/jpeg";
+          canvas.toBlob(blob => {
+            if (!blob) { reject(new Error("裁切失败")); return; }
+            resolve({ blob, mime });
+          }, mime, 0.92);
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("无法读取图片")); };
+        img.src = url;
+      });
+    }
+    function showAvatar(src) {
+      const box = document.getElementById("avatarBox");
+      box.textContent = "";
+      if (!src) { box.textContent = "点击上传"; return; }
+      const img = document.createElement("img");
+      img.alt = "头像预览";
+      img.src = src;
+      box.appendChild(img);
+    }
+    function fillProfile(me) {
+      document.getElementById("email").value = me.email || "";
+      document.getElementById("emailVerified").textContent = me.emailVerified ? "邮箱是否已验证：已验证" : "邮箱是否已验证：未验证";
+      document.getElementById("username").value = me.username || "";
+      document.getElementById("userId").value = me.id || "";
+      document.getElementById("createdAt").value = me.createdAt ? new Date(me.createdAt).toLocaleString("zh-CN") : "";
+      document.getElementById("nickname").value = me.nickname || "";
+      document.getElementById("bio").value = me.bio || "";
+      showAvatar(me.avatarUrl);
+    }
+    async function loadChannels(username) {
+      const data = await fetch("/v1/users/" + encodeURIComponent(username) + "/channels").then(r => r.json());
+      const grid = document.getElementById("channels");
+      grid.replaceChildren();
+      (data.items || []).forEach(c => {
+        const a = document.createElement("a");
+        a.href = "/c/" + encodeURIComponent(c.handle);
+        a.textContent = c.name || ("@" + c.handle);
+        grid.appendChild(a);
+      });
+    }
+    async function hydrate() {
+      if (!token()) { location.replace("/login?next=/settings"); return; }
+      const me = await api("GET", "/v1/me");
+      fillProfile(me);
+      await loadChannels(me.username);
+    }
+    document.getElementById("avatarBox").addEventListener("click", () => document.getElementById("avatarFile").click());
+    document.getElementById("avatarPick").addEventListener("click", () => document.getElementById("avatarFile").click());
+    document.getElementById("avatarFile").addEventListener("change", async e => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = "";
+      if (!file) return;
+      flash(true, "");
+      const prevImg = document.querySelector("#avatarBox img");
+      const prev = prevImg ? prevImg.src : "";
+      try {
+        if (file.type !== "image/jpeg" && file.type !== "image/png") throw new Error("只支持 jpg/png");
+        const { blob, mime } = await cropSquare(file);
+        showAvatar(URL.createObjectURL(blob));
+        const sess = await api("POST", "/v1/me/avatar", { mimeType: mime });
+        const put = await fetch(sess.uploadUrl, { method: "PUT", headers: sess.headers || {}, body: blob });
+        if (!put.ok) throw new Error("头像上传失败");
+        await api("POST", "/v1/me/avatar", { complete: true });
+        const me = await api("GET", "/v1/me");
+        const src = me.avatarUrl
+          ? me.avatarUrl + (me.avatarUrl.indexOf("?") >= 0 ? "&" : "?") + "t=" + Date.now()
+          : URL.createObjectURL(blob);
+        showAvatar(src);
+        window.dispatchEvent(new Event("minitube:account-changed"));
+        flash(true, "头像已更新");
+      } catch (err) {
+        showAvatar(prev);
+        flash(false, err.message);
+      }
+    });
+    document.getElementById("profile").addEventListener("submit", async e => {
+      e.preventDefault();
+      flash(true, "");
+      try {
+        await api("PATCH", "/v1/me", {
+          nickname: document.getElementById("nickname").value,
+          bio: document.getElementById("bio").value
+        });
+        flash(true, "资料已保存");
+      } catch (err) { flash(false, err.message); }
+    });
+    document.getElementById("password").addEventListener("submit", async e => {
+      e.preventDefault();
+      flash(true, "");
+      const next = document.getElementById("newPassword").value;
+      if (next !== document.getElementById("newPassword2").value) {
+        flash(false, "两次新密码不一致");
+        return;
+      }
+      try {
+        await api("PUT", "/v1/me/password", {
+          currentPassword: document.getElementById("currentPassword").value,
+          newPassword: next
+        });
+        document.getElementById("password").reset();
+        flash(true, "密码已更新");
+      } catch (err) { flash(false, err.message); }
+    });
+    hydrate().catch(err => flash(false, err.message));
+  </script>
+  <script src="/static/account.js"></script>
+</body>
+</html>

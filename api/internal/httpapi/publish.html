@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>发布 · MiniTube</title>
+  <link rel="stylesheet" href="/static/account.css"/>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+    header { padding: 12px 16px; background: #1a1a1a; }
+    header a { color: #8ab4ff; text-decoration: none; }
+    main { max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 20px; }
+    label { display: block; margin: 16px 0 6px; font-size: .9rem; }
+    input[type="text"] {
+      width: 100%; box-sizing: border-box; padding: 10px 12px;
+      background: #1a1a1a; color: #eee; border: 1px solid #333; border-radius: 8px;
+    }
+    .vis { display: flex; gap: 16px; margin-top: 8px; }
+    .vis label { display: flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; }
+    .file-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+    .file-row button, .actions button {
+      background: #3b6; color: #111; border: 0; padding: 8px 14px; border-radius: 8px;
+      font-weight: 600; cursor: pointer;
+    }
+    .actions button.secondary { background: #333; color: #eee; }
+    .actions button:disabled, .file-row button:disabled { opacity: .5; cursor: not-allowed; }
+    .preview {
+      width: 250px; height: 140px; background: #000; border-radius: 8px;
+      object-fit: cover; display: block; margin-top: 10px;
+    }
+    .preview.portrait { width: 140px; height: 250px; }
+    .preview.empty { display: flex; align-items: center; justify-content: center; color: #666; font-size: .8rem; }
+    .fname { color: #aaa; font-size: .85rem; margin-top: 8px; min-height: 1.2em; word-break: break-all; }
+    .prog { margin-top: 16px; }
+    .prog-row {
+      display: grid; grid-template-columns: 4.8em 1fr 4.2em;
+      gap: 10px; align-items: center; margin-top: 10px;
+    }
+    .prog-label { color: #ccc; font-size: .85rem; white-space: nowrap; }
+    .prog-track {
+      position: relative; height: 10px; background: #333; border-radius: 4px; overflow: hidden;
+    }
+    .prog-fill { display: block; height: 100%; width: 0; background: #3b6; position: relative; z-index: 1; }
+    .prog-seg {
+      position: absolute; inset: 0; display: flex; pointer-events: none; z-index: 2;
+    }
+    .prog-seg i { flex: 1; border-right: 1px solid #111; box-sizing: border-box; }
+    .prog-seg i:last-child { border-right: 0; }
+    .prog-meta { color: #aaa; font-size: .75rem; text-align: right; }
+    .actions { display: flex; gap: 10px; margin-top: 24px; }
+    .status { margin-top: 10px; color: #ccc; font-size: .9rem; min-height: 1.2em; }
+    .err { color: #f88; margin-top: 12px; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+  <header><a href="/">MiniTube</a> · <a href="/live">直播</a> · <a href="/shorts">短视频</a> · <a href="/compose">发帖</a> · <a href="/feed">时间线</a></header>
+  <main>
+    <h1 id="heading">发布视频</h1>
+    <label for="title">标题</label>
+    <input id="title" type="text" maxlength="200" placeholder="将显示在缩略图下方" required/>
+    <label>发布后状态</label>
+    <div class="vis">
+      <label><input type="radio" name="vis" value="public" checked/> 公开</label>
+      <label><input type="radio" name="vis" value="private"/> 私藏</label>
+    </div>
+    <label>视频文件</label>
+    <div class="file-row">
+      <button type="button" id="pick">选择文件</button>
+      <input id="file" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska,.mp4,.webm,.mov,.mkv,.mpg,.mpeg" hidden/>
+    </div>
+    <canvas class="preview empty" id="preview" width="250" height="140"></canvas>
+    <p class="fname" id="fname"></p>
+    <div class="prog">
+      <div class="prog-row">
+        <span class="prog-label">上传进度</span>
+        <div class="prog-track"><span class="prog-fill" id="upBar"></span></div>
+        <span class="prog-meta" id="upMeta">0%</span>
+      </div>
+      <div class="prog-row">
+        <span class="prog-label">转码进度</span>
+        <div class="prog-track">
+          <div class="prog-seg" id="tcSegs"></div>
+          <span class="prog-fill" id="tcBar"></span>
+        </div>
+        <span class="prog-meta" id="tcMeta">0%</span>
+      </div>
+    </div>
+    <p class="status" id="status"></p>
+    <p class="err" id="err"></p>
+    <div class="actions">
+      <button type="button" id="upload" disabled>上传</button>
+      <button type="button" id="cancel" class="secondary" disabled>取消</button>
+    </div>
+  </main>
+  <script>
+    const API = location.origin;
+    const qs = new URLSearchParams(location.search);
+    const channelId = qs.get("channel") || "";
+    const handle = qs.get("handle") || "";
+    const kind = qs.get("kind") === "short" ? "short" : "long";
+    document.getElementById("heading").textContent = kind === "short" ? "发布短视频" : "发布视频";
+    document.title = (kind === "short" ? "发布短视频" : "发布视频") + " · MiniTube";
+
+    const titleEl = document.getElementById("title");
+    const fileEl = document.getElementById("file");
+    const preview = document.getElementById("preview");
+    const fnameEl = document.getElementById("fname");
+    const uploadBtn = document.getElementById("upload");
+    const cancelBtn = document.getElementById("cancel");
+    const errEl = document.getElementById("err");
+    const upBar = document.getElementById("upBar");
+    const upMeta = document.getElementById("upMeta");
+    const tcBar = document.getElementById("tcBar");
+    const tcMeta = document.getElementById("tcMeta");
+    const tcSegs = document.getElementById("tcSegs");
+    const statusEl = document.getElementById("status");
+    if (kind === "short") {
+      preview.classList.add("portrait");
+      preview.width = 140;
+      preview.height = 250;
+    }
+
+    let file = null;
+    let videoId = "";
+    let cancelled = false;
+    let objectUrl = "";
+    const xhrs = new Set();
+    const UPLOAD_CONCURRENCY = 4;
+    const CHUNK_ATTEMPTS = 8;
+    const MAX_VIDEO_BYTES = 5 * 1024 * 1024 * 1024;
+
+    function token() { return window.mtAuth.getToken(); }
+    function headers(json) {
+      const h = {};
+      if (token()) h.Authorization = "Bearer " + token();
+      if (json) h["Content-Type"] = "application/json";
+      return h;
+    }
+    function fmtMB(n) { return (n / (1024 * 1024)).toFixed(1) + "MB"; }
+    function vis() {
+      const el = document.querySelector("input[name=vis]:checked");
+      return el ? el.value : "public";
+    }
+    function back() {
+      location.href = handle ? ("/c/" + encodeURIComponent(handle)) : "/";
+    }
+    function setUploadBar(done, total) {
+      const pct = total ? Math.min(100, Math.round(done / total * 100)) : 0;
+      upBar.style.width = pct + "%";
+      upMeta.textContent = total ? (pct + "% · " + fmtMB(done) + "/" + fmtMB(total)) : "0%";
+    }
+    function setTranscodeBar(tc) {
+      const rungs = (tc && tc.rungs) || [];
+      const pct = tc && Number.isFinite(tc.percent) ? Math.max(0, Math.min(100, tc.percent)) : 0;
+      tcBar.style.width = pct + "%";
+      const n = rungs.length || 1;
+      if (tcSegs.childElementCount !== n) {
+        tcSegs.innerHTML = "";
+        for (let i = 0; i < n; i++) tcSegs.appendChild(document.createElement("i"));
+      }
+      if (rungs.length) {
+        const i = Math.max(0, Math.min(rungs.length - 1, tc.index || 0));
+        tcMeta.textContent = Math.round(pct) + "% · " + rungs[i] + "p";
+      } else {
+        tcMeta.textContent = Math.round(pct) + "%";
+      }
+    }
+    function syncUploadEnabled() {
+      uploadBtn.disabled = !file || !titleEl.value.trim() || !!videoId;
+    }
+    function drawCover(ctx, video, dw, dh) {
+      const vw = video.videoWidth || dw;
+      const vh = video.videoHeight || dh;
+      const scale = Math.max(dw / vw, dh / vh);
+      const sw = dw / scale;
+      const sh = dh / scale;
+      ctx.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, dw, dh);
+    }
+    function drawPreview(f) {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = "";
+      preview.classList.add("empty");
+      const ctx = preview.getContext("2d");
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, preview.width, preview.height);
+      const url = URL.createObjectURL(f);
+      objectUrl = url;
+      const v = document.createElement("video");
+      v.muted = true;
+      v.preload = "metadata";
+      v.src = url;
+      const fail = () => { preview.classList.add("empty"); };
+      v.onerror = fail;
+      v.onloadeddata = () => {
+        const grab = () => {
+          try {
+            drawCover(ctx, v, preview.width, preview.height);
+            preview.classList.remove("empty");
+          } catch (e) { fail(); }
+          v.src = "";
+        };
+        const t = Math.min(0.1, (v.duration || 1) / 10);
+        if (v.seekable && v.seekable.length) {
+          v.currentTime = t;
+          v.onseeked = grab;
+        } else grab();
+      };
+    }
+
+    titleEl.addEventListener("input", syncUploadEnabled);
+    document.getElementById("pick").addEventListener("click", () => fileEl.click());
+    fileEl.addEventListener("change", () => {
+      file = fileEl.files && fileEl.files[0] ? fileEl.files[0] : null;
+      fnameEl.textContent = file ? file.name : "";
+      if (file) drawPreview(file);
+      syncUploadEnabled();
+    });
+
+    async function api(method, path, body) {
+      const r = await fetch(API + path, {
+        method,
+        headers: headers(body != null),
+        body: body == null ? undefined : JSON.stringify(body)
+      });
+      const text = await r.text();
+      let data = {};
+      try { data = text ? JSON.parse(text) : {}; } catch {}
+      if (!r.ok) throw new Error(data.message || ("HTTP " + r.status));
+      return data;
+    }
+    function putChunk(url, blob, onProg) {
+      return new Promise((resolve, reject) => {
+        const req = new XMLHttpRequest();
+        xhrs.add(req);
+        req.open("PUT", url);
+        const tok = token();
+        if (tok) req.setRequestHeader("Authorization", "Bearer " + tok);
+        req.setRequestHeader("Content-Type", "application/octet-stream");
+        req.upload.onprogress = (e) => { if (e.lengthComputable) onProg(e.loaded); };
+        req.onload = () => {
+          xhrs.delete(req);
+          if (req.status >= 200 && req.status < 300) resolve();
+          else {
+            let msg = "上传失败 (" + req.status + ")";
+            try { msg = JSON.parse(req.responseText).message || msg; } catch {}
+            const err = new Error(msg);
+            err.status = req.status;
+            reject(err);
+          }
+        };
+        req.onerror = () => { xhrs.delete(req); reject(new Error("网络错误")); };
+        req.onabort = () => { xhrs.delete(req); reject(new Error("cancelled")); };
+        req.send(blob);
+      });
+    }
+    function abortUploads() {
+      xhrs.forEach(req => { try { req.abort(); } catch {} });
+      xhrs.clear();
+    }
+    function canRetry(err) {
+      if (String(err && err.message || "") === "cancelled") return false;
+      const st = Number(err && err.status);
+      if (st === 400 || st === 401 || st === 403 || st === 404 || st === 409 || st === 413 || st === 422) return false;
+      if (st === 408 || st === 429 || (st >= 500 && st < 600)) return true;
+      return /网络/.test(String(err && err.message || ""));
+    }
+    async function putChunkRetry(url, blob, onProg) {
+      let last = null;
+      for (let attempt = 1; attempt <= CHUNK_ATTEMPTS; attempt++) {
+        if (cancelled) throw new Error("cancelled");
+        try {
+          await putChunk(url, blob, onProg);
+          return;
+        } catch (e) {
+          last = e;
+          if (e.message === "cancelled") throw e;
+          if (!canRetry(e) || attempt === CHUNK_ATTEMPTS) throw e;
+          await new Promise(r => setTimeout(r, Math.min(500 * attempt, 4000)));
+        }
+      }
+      throw last;
+    }
+    async function uploadChunks(target, id, chunkSize) {
+      const n = Math.ceil(target.size / chunkSize);
+      const total = target.size;
+      let committed = 0;
+      const inflight = {};
+      let peak = 0;
+      const refresh = () => {
+        let extra = 0;
+        Object.keys(inflight).forEach(k => { extra += inflight[k]; });
+        peak = Math.max(peak, committed + extra);
+        setUploadBar(peak, total);
+      };
+      let next = 0;
+      let fatal = null;
+      async function worker() {
+        for (;;) {
+          if (cancelled) throw new Error("cancelled");
+          if (fatal) throw fatal;
+          const i = next++;
+          if (i >= n) return;
+          const start = i * chunkSize;
+          const blob = target.slice(start, Math.min(start + chunkSize, target.size), "application/octet-stream");
+          inflight[i] = 0;
+          try {
+            await putChunkRetry(API + "/v1/videos/" + id + "/chunks/" + i, blob, loaded => {
+              inflight[i] = Math.min(loaded, blob.size);
+              refresh();
+            });
+            delete inflight[i];
+            committed += blob.size;
+            refresh();
+          } catch (e) {
+            delete inflight[i];
+            if (e.message === "cancelled" && fatal) throw fatal;
+            fatal = fatal || e;
+            abortUploads();
+            throw fatal;
+          }
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, n) }, () => worker()));
+    }
+    async function pollReady(id) {
+      for (;;) {
+        const v = await api("GET", "/v1/videos/" + id);
+        setTranscodeBar(v.transcode);
+        if (v.status === "ready") {
+          setTranscodeBar({ rungs: (v.transcode && v.transcode.rungs) || [], index: 99, percent: 100 });
+          return v;
+        }
+        if (v.status === "failed") throw new Error(v.errorMessage || "转码失败");
+        const rungs = (v.transcode && v.transcode.rungs) || [];
+        const i = v.transcode && v.transcode.index;
+        statusEl.textContent = rungs[i] ? ("正在转码 " + rungs[i] + "p…") : "正在转码…";
+        await new Promise(r => setTimeout(r, 5000));
+      }
+    }
+
+    uploadBtn.addEventListener("click", async () => {
+      errEl.textContent = "";
+      if (!file || !titleEl.value.trim()) return;
+      if (file.size > MAX_VIDEO_BYTES) {
+        errEl.textContent = "视频不能超过 5GB";
+        return;
+      }
+      cancelled = false;
+      uploadBtn.disabled = true;
+      cancelBtn.disabled = false;
+      statusEl.textContent = "正在上传…";
+      const total = file.size;
+      setUploadBar(0, total);
+      setTranscodeBar({ rungs: [], percent: 0 });
+      try {
+        const created = await api("POST", "/v1/videos", {
+          channelId: channelId,
+          title: titleEl.value.trim(),
+          kind: kind,
+          visibility: vis(),
+          mimeType: file.type || "video/mp4",
+          filename: file.name,
+          size: file.size
+        });
+        videoId = created.video.id;
+        const chunkSize = created.upload.chunkSize || (8 * 1024 * 1024);
+        await uploadChunks(file, videoId, chunkSize);
+        abortUploads();
+        cancelBtn.disabled = true;
+        statusEl.textContent = "正在转码…";
+        setUploadBar(total, total);
+        const done = await api("POST", "/v1/videos/" + videoId + "/complete-upload");
+        setTranscodeBar(done.transcode);
+        await pollReady(videoId);
+        statusEl.textContent = "已处理完成";
+        back();
+      } catch (e) {
+        abortUploads();
+        if (cancelled || e.message === "cancelled") {
+          statusEl.textContent = "已取消";
+        } else {
+          errEl.textContent = e.message;
+        }
+        uploadBtn.disabled = false;
+        cancelBtn.disabled = true;
+        videoId = "";
+        syncUploadEnabled();
+      }
+    });
+
+    cancelBtn.addEventListener("click", async () => {
+      cancelled = true;
+      abortUploads();
+      if (videoId) {
+        try { await api("DELETE", "/v1/videos/" + videoId); } catch {}
+        videoId = "";
+      }
+      cancelBtn.disabled = true;
+      uploadBtn.disabled = false;
+      statusEl.textContent = "已取消";
+      syncUploadEnabled();
+    });
+
+    async function boot() {
+      setUploadBar(0, 0);
+      setTranscodeBar({ rungs: [], percent: 0 });
+      if (!token()) {
+        location.href = "/login?next=" + encodeURIComponent(location.pathname + location.search);
+        return;
+      }
+      if (!channelId) {
+        errEl.textContent = "缺少频道";
+        uploadBtn.disabled = true;
+        return;
+      }
+      try {
+        const me = await api("GET", "/v1/me");
+        if (handle) {
+          const ch = await api("GET", "/v1/channels/" + encodeURIComponent(handle));
+          if (ch.ownerUsername !== me.username) {
+            errEl.textContent = "不是你的频道";
+            uploadBtn.disabled = true;
+          }
+        }
+      } catch (e) {
+        errEl.textContent = e.message;
+      }
+    }
+    boot();
+  </script>
+  <script src="/static/account.js"></script>
+</body>
+</html>

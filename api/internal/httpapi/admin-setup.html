@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>管理维护 · MiniTube</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+    header { padding: 12px 16px; background: #1a1a1a; display: flex; gap: 16px; align-items: center; }
+    header a { color: #8ab4ff; text-decoration: none; }
+    main { max-width: 520px; margin: 0 auto; padding: 24px 16px; }
+    label, input, button { display: block; width: 100%; margin: 8px 0; box-sizing: border-box; }
+    input { background: #1a1a1a; color: #eee; border: 1px solid #333; padding: 10px; border-radius: 6px; }
+    button { background: #3b6; color: #111; border: 0; padding: 10px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    button.secondary { background: #333; color: #eee; }
+    .err { color: #f88; }
+    .ok { color: #8d8; }
+    .meta { color: #aaa; font-size: .9rem; }
+    fieldset { border: 1px solid #333; border-radius: 8px; margin: 16px 0; padding: 12px 16px; }
+    legend { padding: 0 6px; color: #ccc; }
+    img.qr { display: block; background: #fff; padding: 8px; border-radius: 8px; width: 192px; height: 192px; }
+    code { word-break: break-all; font-size: .8rem; color: #ccc; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/">MiniTube</a>
+    <a href="/admin">管理页</a>
+  </header>
+  <main>
+    <p class="meta">此页仅可从局域网 <code>http://192.168.43.111:8080/admin/setup</code> 打开，公网域名会返回 404。</p>
+    <p class="err" id="err"></p>
+    <p class="ok" id="ok"></p>
+    <form id="login">
+      <p class="meta" id="loginHint">第一次绑定只需口令。之后需要口令加动态密码。</p>
+      <label>口令
+        <input id="pass" type="password" autocomplete="current-password" required/>
+      </label>
+      <label id="totpWrap">动态密码
+        <input id="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="6"/>
+      </label>
+      <button type="submit">进入维护</button>
+    </form>
+    <div id="panel" hidden>
+      <fieldset>
+        <legend>修改口令</legend>
+        <label>当前口令
+          <input id="cur" type="password" autocomplete="current-password"/>
+        </label>
+        <label>新口令
+          <input id="npw" type="password" autocomplete="new-password"/>
+        </label>
+        <label>确认新口令
+          <input id="npw2" type="password" autocomplete="new-password"/>
+        </label>
+        <button type="button" id="chgPw">更新口令</button>
+      </fieldset>
+      <fieldset>
+        <legend>动态密码</legend>
+        <p class="meta">用 Microsoft Authenticator 等应用扫码。重新绑定会使旧码立刻失效。</p>
+        <div id="qrBox" hidden>
+          <img class="qr" id="qr" alt="TOTP 二维码"/>
+          <p class="meta">无法扫码时手动输入密钥：</p>
+          <code id="secret"></code>
+          <label>输入应用中的 6 位数字以确认绑定
+            <input id="enroll" inputmode="numeric" maxlength="6"/>
+          </label>
+          <button type="button" id="confirm">确认绑定</button>
+        </div>
+        <button type="button" class="secondary" id="begin">生成绑定二维码</button>
+      </fieldset>
+    </div>
+  </main>
+  <script>
+    const KEY = "mt_setup_token";
+    const errEl = document.getElementById("err");
+    const okEl = document.getElementById("ok");
+    const loginForm = document.getElementById("login");
+    const panel = document.getElementById("panel");
+    const totpWrap = document.getElementById("totpWrap");
+    let enrolled = true;
+    function token() { return sessionStorage.getItem(KEY) || ""; }
+    function setToken(t) { if (t) sessionStorage.setItem(KEY, t); else sessionStorage.removeItem(KEY); }
+    function showErr(m) { errEl.textContent = m || ""; okEl.textContent = ""; }
+    function showOk(m) { okEl.textContent = m || ""; errEl.textContent = ""; }
+    function authHeaders() {
+      const h = { "Content-Type": "application/json" };
+      const t = token();
+      if (t) h.Authorization = "Bearer " + t;
+      return h;
+    }
+    async function parse(r) {
+      const data = await r.json().catch(() => ({}));
+      return { ok: r.ok, status: r.status, data };
+    }
+    function loginMsg(code, retryAfter) {
+      if (code === "locked") return "请于 " + (retryAfter || 1) + " 秒后再试";
+      if (code === "bad_password" || code === "bad_totp") return "口令或动态码错误";
+      if (code === "admin_disabled") return "管理口令尚未初始化";
+      return "登录失败";
+    }
+    async function bootstrap() {
+      const st = await parse(await fetch("/v1/admin/setup"));
+      if (st.data.code === "admin_disabled") {
+        showErr("管理口令尚未初始化（需要环境变量 ADMIN_PASSWORD 首次写入）。");
+        return;
+      }
+      if (!st.ok) { showErr("无法读取维护状态"); return; }
+      enrolled = !!st.data.totpEnrolled;
+      totpWrap.hidden = !enrolled;
+      document.getElementById("loginHint").textContent = enrolled
+        ? "已绑定动态密码，请同时输入口令与 6 位数字。"
+        : "尚未绑定动态密码，只需口令。登录后会给出扫码二维码。";
+    }
+    loginForm.addEventListener("submit", async e => {
+      e.preventDefault();
+      showErr("");
+      const r = await parse(await fetch("/v1/admin/setup/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          password: document.getElementById("pass").value,
+          totp: document.getElementById("totp").value.trim()
+        })
+      }));
+      if (!r.ok) {
+        if (r.status === 404) { showErr("维护页仅可从局域网访问。请打开 http://192.168.43.111:8080/admin/setup"); return; }
+        if (r.data.code === "locked" || r.status === 429) { showErr(loginMsg(r.data.code, r.data.retryAfter)); return; }
+        showErr(loginMsg(r.data.code, r.data.retryAfter));
+        return;
+      }
+      setToken(r.data.token);
+      enrolled = !!r.data.totpEnrolled;
+      document.getElementById("pass").value = "";
+      document.getElementById("totp").value = "";
+      loginForm.hidden = true;
+      panel.hidden = false;
+      if (!enrolled) beginTotp();
+    });
+    document.getElementById("chgPw").addEventListener("click", async () => {
+      const a = document.getElementById("npw").value;
+      const b = document.getElementById("npw2").value;
+      if (a !== b) { showErr("两次输入的新口令不一致"); return; }
+      if (!a.trim()) { showErr("新口令不能为空"); return; }
+      const r = await parse(await fetch("/v1/admin/setup/password", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          currentPassword: document.getElementById("cur").value,
+          newPassword: a
+        })
+      }));
+      if (!r.ok) {
+        if (r.status === 401 && r.data.code === "need_auth") { setToken(""); location.reload(); return; }
+        showErr(r.data.code === "bad_password" ? "当前口令错误" : (r.data.message || "改口令失败"));
+        return;
+      }
+      document.getElementById("cur").value = "";
+      document.getElementById("npw").value = "";
+      document.getElementById("npw2").value = "";
+      showOk("口令已更新");
+    });
+    async function beginTotp() {
+      showErr("");
+      const r = await parse(await fetch("/v1/admin/setup/totp/begin", {
+        method: "POST",
+        headers: authHeaders()
+      }));
+      if (!r.ok) {
+        if (r.status === 401) { setToken(""); location.reload(); return; }
+        showErr("无法生成动态码");
+        return;
+      }
+      document.getElementById("qrBox").hidden = false;
+      document.getElementById("qr").src = r.data.qrPng || "";
+      document.getElementById("secret").textContent = r.data.secret || "";
+      document.getElementById("enroll").value = "";
+      showOk(enrolled ? "已生成新二维码，旧动态码已作废，请扫码并确认。" : "请用 Authenticator 扫码，然后输入 6 位数字确认。");
+      enrolled = false;
+    }
+    document.getElementById("begin").addEventListener("click", beginTotp);
+    document.getElementById("confirm").addEventListener("click", async () => {
+      const r = await parse(await fetch("/v1/admin/setup/totp/confirm", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ code: document.getElementById("enroll").value.trim() })
+      }));
+      if (!r.ok) {
+        showErr(r.data.code === "bad_totp" ? "动态码不正确" : (r.data.message || "绑定失败"));
+        return;
+      }
+      enrolled = true;
+      document.getElementById("qrBox").hidden = true;
+      document.getElementById("enroll").value = "";
+      showOk("动态码已绑定。可以用口令加动态码登录 /admin。");
+    });
+    bootstrap();
+  </script>
+</body>
+</html>
