@@ -5,7 +5,7 @@ Issue 与里程碑在 GitHub Project 上跟踪。动手前从最新 `main` 开�
 ## 分支与 PR
 
 - 分支名建议：`issue-<编号>-简短英文`（例如 `issue-6-deploy-docs`）。
-- PR 标题说清为什么；正文用 `Fixes #<编号>` 关联 issue（合入后自动关闭）。
+- PR 标题说清为什么；正文用 `Closes #<编号>` 或 `Fixes #<编号>` 关联 issue（合入后自动关闭）。模板只有一份：`.github/PULL_REQUEST_TEMPLATE.md`。Issue 用 `.github/ISSUE_TEMPLATE/task.yml`。
 - 不要直接推 `main`。合入由仓库维护者操作。
 - 不要 `--force` 推已分享的分支。
 

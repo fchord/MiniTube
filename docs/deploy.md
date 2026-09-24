@@ -58,6 +58,8 @@ kubectl -n minitube rollout restart deploy/minitube-api
 
 API 只跑在 `k8s-master` 的 `hostPort: 8080`。日常改页面/引擎用下面脚本（含测试、import、重启、探活），不要只写 `rollout restart` 却忘了先把新镜像打进 containerd。
 
+**import 路径假设：** `deploy-api.sh` 在 k8s-master 上用 `ctr import /tmp/minitube-images/minitube-api.tar`（Job `nsenter` 读的是 **master 宿主机**上的这个路径）。请在 **k8s-master**（或与 master **共享该 tar 路径**的机器）上执行。若在别的机器编镜像，不要用这条本地路径，应复用 `build-images.sh`：master 起 HTTP 提供 tar，其它节点 `curl | ctr import`。
+
 ```bash
 chmod +x k8s/minitube/deploy-api.sh
 ./k8s/minitube/deploy-api.sh

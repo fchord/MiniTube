@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Rebuild minitube-api, import into k8s-master containerd, rollout, verify healthz.
 # API uses hostPort 8080/18080 on k8s-master; only that node needs the new image.
+#
+# Import reads TAR_DIR/minitube-api.tar on the k8s-master HOST (nsenter).
+# Run this on k8s-master, or a machine that shares that tar path with master.
+# Building on another machine? Use build-images.sh HTTP import instead.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
@@ -38,7 +42,8 @@ docker build \
 echo ">> docker save"
 docker save minitube/api:local -o "$TAR_DIR/minitube-api.tar"
 
-echo ">> import on k8s-master"
+echo ">> import on k8s-master host path ${TAR_DIR}/minitube-api.tar"
+echo "   (run on k8s-master or a host sharing that path; otherwise use build-images.sh HTTP import)"
 kubectl -n kube-system delete job minitube-import-k8s-master --ignore-not-found
 cat >/tmp/minitube-import-k8s-master.yaml <<YML
 apiVersion: batch/v1
