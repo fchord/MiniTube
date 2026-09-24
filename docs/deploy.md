@@ -13,7 +13,7 @@
 | 集群 | 三节点：`k8s-master` `192.168.43.111`、`k8s-worker2` `192.168.43.131`（NFS + GPU）、`k8s-worker1`（QSV，NotReady 时 worker 会 Pending） |
 | 共享盘 | worker2 内核 NFS 导出 `/data/minitube`，PVC `minitube-media` 挂到 API `/data` |
 | 镜像 | 不拉取 Docker Hub 的 ffmpeg。`bundle-ffmpeg.py` 把本机 `ffmpeg`/`ffprobe` 打进 `dist/ffmpeg-bundle`，再 `COPY` 进 `ubuntu:22.04` |
-| 密钥 | 只放 k8s Secret / 本地 `.env`，**不要提交**。模板见 `.env.example`。`.gitignore` 已忽略 `.env`、`data/`、`dist/` |
+| 密钥 | 只放 k8s Secret / 本地 `.env`，**不要提交**。可复制模板 [`.env.example`](../.env.example)，清单 [config.md](config.md)。`.gitignore` 已忽略 `.env`、`data/`、`dist/` |
 | 本机端口 | compose Postgres 映射 **5433**；k8s API 用 master **hostPort 8080 / 18080**，与本机 `make run` 抢 8080 |
 
 NVIDIA 用户态必须与内核模块同版本。worker2 若 `unattended-upgrades` 升了驱动未重启，NVENC Pod 会 CrashLoop（`Driver/library version mismatch`）。修法：重启该节点（NFS 会抖一下）。

@@ -10,6 +10,7 @@
 | [shorts-rebuffer.md](shorts-rebuffer.md) | PCM 不足时攒码流：冻钟、Worklet hold、听路先 demux 音频 |
 | [architecture.md](architecture.md) | API 与媒体分层、默认技术选型 |
 | [deploy.md](deploy.md) | 运行前提、本机、k8s 切流、日常更新 API、hostPort、管理页 |
+| [config.md](config.md) | 环境变量清单：API / worker / Secret，对应 `.env.example` |
 | [media-edges.md](media-edges.md) | 码流边缘分流：页面走 Cloudflare，HLS 可走 ctc 直连；配置在 `site_settings`；开关在 `/admin` |
 | [client-strategy.md](client-strategy.md) | Flutter 全家桶 + 独立 Web + 统一 API |
 | [roadmap.md](roadmap.md) | Phase 0→2 为 MVP，短视频/直播后置 |
