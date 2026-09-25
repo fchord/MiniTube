@@ -16,12 +16,16 @@
 
 ```bash
 curl -sS -m 8 -o /dev/null -w "%{http_code}\n" http://192.168.43.111:8080/healthz
-# 期望 204；卡住或非 204 = API 进程/hostPort/Cloudflare 回源有问题
+# 期望 204；卡住或非 204 = 本机到 master 不通，或 API 进程 / hostPort 有问题
 ```
 
 **204 只说明 HTTP 进程在。** 不说明库、转码、直播、NFS 正常。ctc 边缘不要用 `/healthz` 探活（只开放媒体路径），见 [media-edges.md](media-edges.md) 的 edge-probe。
 
-若公网 204、源站超时：查 Cloudflare 回源。源站 204、公网失败：查隧道/证书。Pod `Pending` 且另有 Running：hostPort 死锁，见 [deploy.md](deploy.md)。
+公网与源站对照（主站是 **橙云代理 + 回源端口**，不是 Cloudflare Tunnel）：
+
+- 公网 204、打 `192.168.43.111:8080`（测试 **8081**）超时：回源已通，查你这台机器到 master 的局域网。
+- 源站 204、公网失败：查 DNS（橙云）、回源 IP/端口（生产 **8080**、测试 **8081**）、SSL 模式。
+- Pod `Pending` 且另有 Running：hostPort 死锁，见 [deploy.md](deploy.md)。
 
 ## 服务就绪（API 之外）
 
