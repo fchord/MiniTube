@@ -69,6 +69,15 @@ ENV=prod ./k8s/minitube/deploy-api.sh
 
 不设 `ENV` 会直接退出，避免误打生产。测试环境第一次用 `./k8s/minitube-test/bootstrap.sh`，见 [environments.md](environments.md)。
 
+`deploy-api.sh` **不** apply ConfigMap。仓库里生产 ConfigMap 若只多了 `APP_ENV: prod`，集群未 apply 时进程仍是缺省 `dev`；`IsTest()` 仅认 `test`，ctc 行为与 `prod` 相同。下次改生产配置时再：
+
+```bash
+kubectl apply -f k8s/minitube/configmap.yaml
+ENV=prod ./k8s/minitube/deploy-api.sh
+```
+
+（新环境变量要等 API Pod 重建才进进程。）
+
 等价手工步骤：
 
 1. `cd api && go test ./internal/httpapi`（需能连 `DATABASE_URL`，默认 `127.0.0.1:5433`）

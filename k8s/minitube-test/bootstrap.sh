@@ -8,11 +8,9 @@ NFS_SERVER="${NFS_SERVER:-192.168.43.131}"
 
 need() { command -v "$1" >/dev/null || { echo "missing $1"; exit 1; }; }
 need kubectl
+need openssl
 
-# 不要 source 仓库根 .env：那里常是生产/本机密钥。新 Secret 用 TEST_* 或随机值。
-POSTGRES_PASSWORD="${TEST_POSTGRES_PASSWORD:-$(openssl rand -hex 16)}"
-JWT_SECRET="${TEST_JWT_SECRET:-$(openssl rand -hex 24)}"
-SRS_HOOK_SECRET="${TEST_SRS_HOOK_SECRET:-$(openssl rand -hex 16)}"
+# 不要 source 仓库根 .env：那里常是生产/本机密钥。新建 Secret 用 TEST_* 或 openssl 随机值。
 
 hostexec() {
   local node="$1"
@@ -59,8 +57,7 @@ YML
   kubectl wait -n kube-system --for=condition=complete "job/${name}" --timeout=180s
 }
 
-echo ">> nfs-prep manifest + export /data/minitube-test on worker2"
-kubectl apply -f k8s/minitube/nfs-prep.yaml
+echo ">> export /data/minitube-test on worker2 (exportfs -ra only; do not apply nfs-prep.yaml — that DaemonSet restarts nfs-kernel-server and stalls prod hard mounts)"
 hostexec k8s-worker2 minitube-test-nfs-export "$(cat <<'EOF'
 set -euo pipefail
 mkdir -p /data/minitube-test/uploads /data/minitube-test/srs-hls /data/minitube-test/live-hls
@@ -79,14 +76,11 @@ kubectl apply -f k8s/minitube-test/namespace.yaml
 kubectl apply -f k8s/minitube-test/quota.yaml
 kubectl apply -f k8s/minitube-test/limitrange.yaml
 if ! kubectl -n "$NS" get secret minitube >/dev/null 2>&1; then
-  POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(openssl rand -hex 16)}"
-  JWT_SECRET="${JWT_SECRET:-$(openssl rand -hex 24)}"
-  SRS_HOOK_SECRET="${SRS_HOOK_SECRET:-$(openssl rand -hex 16)}"
   kubectl -n "$NS" create secret generic minitube \
-    --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-    --from-literal=JWT_SECRET="$JWT_SECRET" \
-    --from-literal=SRS_HOOK_SECRET="$SRS_HOOK_SECRET"
-  echo "   created secret minitube (generated if .env had no keys)"
+    --from-literal=POSTGRES_PASSWORD="${TEST_POSTGRES_PASSWORD:-$(openssl rand -hex 16)}" \
+    --from-literal=JWT_SECRET="${TEST_JWT_SECRET:-$(openssl rand -hex 24)}" \
+    --from-literal=SRS_HOOK_SECRET="${TEST_SRS_HOOK_SECRET:-$(openssl rand -hex 16)}"
+  echo "   created secret minitube (TEST_* if set, otherwise openssl rand)"
 else
   echo "   keep existing secret minitube"
 fi

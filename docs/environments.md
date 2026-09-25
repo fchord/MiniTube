@@ -50,7 +50,7 @@ ENV=test ./k8s/minitube/deploy-api.sh    # 测试 8081，镜像 :test
 # 或 make deploy-api ENV=prod
 ```
 
-import 路径假设与生产相同：Job `nsenter` 读 **master 宿主机**上的 `TAR_DIR/minitube-api.tar`。hostPort 死锁时只删**该环境**里重启前记下的旧 API Pod。
+import 路径假设与生产相同：Job `nsenter` 读 **master 宿主机**上的 `TAR_DIR/minitube-api.tar`。hostPort 死锁时只删**该环境**里重启前记下的旧 API Pod。`deploy-api.sh` 不 apply ConfigMap；改 `k8s/minitube/configmap.yaml` 时要另跑 `kubectl apply -f k8s/minitube/configmap.yaml` 再发版。
 
 同时更 worker 镜像仍用 `./k8s/minitube/build-images.sh`，再按 namespace 重启：
 
