@@ -8,6 +8,7 @@ import (
 )
 
 type Config struct {
+	AppEnv           string
 	HTTPAddr         string
 	DatabaseURL      string
 	JWTSecret        []byte
@@ -23,6 +24,7 @@ type Config struct {
 	EmailTokenTTL    time.Duration
 	AdminUserIDs     []string
 	AdminPassword    string
+	AdminSetupURL    string
 	MediaEdgeTLSAddr string
 	MediaEdgeTLSCert string
 	MediaEdgeTLSKey  string
@@ -31,6 +33,7 @@ type Config struct {
 
 func FromEnv() Config {
 	return Config{
+		AppEnv:           strings.ToLower(strings.TrimSpace(getenv("APP_ENV", "dev"))),
 		HTTPAddr:         getenv("HTTP_ADDR", ":8080"),
 		DatabaseURL:      getenv("DATABASE_URL", "postgres://minitube:minitube@127.0.0.1:5433/minitube?sslmode=disable"),
 		JWTSecret:        []byte(getenv("JWT_SECRET", "dev-change-me")),
@@ -46,11 +49,16 @@ func FromEnv() Config {
 		EmailTokenTTL:    duration("EMAIL_TOKEN_TTL", 24*time.Hour),
 		AdminUserIDs:     splitCSV(getenv("ADMIN_USER_IDS", "")),
 		AdminPassword:    getenv("ADMIN_PASSWORD", ""),
+		AdminSetupURL:    getenv("ADMIN_SETUP_URL", "http://192.168.43.111:8080/admin/setup"),
 		MediaEdgeTLSAddr: getenv("MEDIA_EDGE_TLS_ADDR", ""),
 		MediaEdgeTLSCert: getenv("MEDIA_EDGE_TLS_CERT", "/data/ctc-tls/fullchain.pem"),
 		MediaEdgeTLSKey:  getenv("MEDIA_EDGE_TLS_KEY", "/data/ctc-tls/privkey.pem"),
 		MediaEdgeTLSHost: getenv("MEDIA_EDGE_TLS_HOST", "ctc.minitube.19121122.xyz"),
 	}
+}
+
+func (c Config) IsTest() bool {
+	return c.AppEnv == "test"
 }
 
 func splitCSV(s string) []string {

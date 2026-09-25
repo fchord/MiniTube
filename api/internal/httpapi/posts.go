@@ -372,7 +372,7 @@ func (s *Server) feedPage(w http.ResponseWriter, r *http.Request) {
 	s.servePage(w, "feed.html", "")
 }
 
-const staticAssetVersion = "20260923j"
+const staticAssetVersion = "20260925a"
 
 func (s *Server) servePage(w http.ResponseWriter, file, slot string) {
 	s.servePageEx(w, file, slot, nil)

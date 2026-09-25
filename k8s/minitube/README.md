@@ -1,6 +1,6 @@
 # MiniTube on this k8s 集群
 
-三节点 homelab：共享盘用 worker2 上的 **内核 NFS**（`/data/minitube`），应用仍走本地目录。转码 worker 按硬编瀑布抢任务。完整步骤、前提、日常更新与 DoD 见仓库 **[docs/deploy.md](../../docs/deploy.md)**。
+三节点 homelab：共享盘用 worker2 上的 **内核 NFS**（`/data/minitube`），应用仍走本地目录。转码 worker 按硬编瀑布抢任务。完整步骤、前提、日常更新与 DoD 见仓库 **[docs/deploy.md](../../docs/deploy.md)**。测试环境（另一 namespace）见 **[docs/environments.md](../../docs/environments.md)** 与 [`k8s/minitube-test/`](../minitube-test/)。
 
 | Rank | Deployment | 节点 | 编码器 |
 | --- | --- | --- | --- |
@@ -29,7 +29,7 @@ chmod +x k8s/minitube/cutover.sh k8s/minitube/build-images.sh
 不要只 `rollout restart`。先把新镜像 import 进 master 的 containerd，并处理 hostPort 死锁：
 
 ```bash
-./k8s/minitube/deploy-api.sh
+ENV=prod ./k8s/minitube/deploy-api.sh
 ```
 
 同时更新 worker 才跑 `./k8s/minitube/build-images.sh`，再 `kubectl -n minitube rollout restart deploy -l app=minitube-worker`。

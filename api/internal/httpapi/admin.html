@@ -27,10 +27,11 @@
 <body>
   <header>
     <a href="/">MiniTube</a>
-    <a href="http://192.168.43.111:8080/admin/setup">维护口令（仅局域网）</a>
+    <a href="__ADMIN_SETUP_URL__">维护口令（仅局域网）</a>
   </header>
   <main>
     <h1>站点管理</h1>
+    <p class="meta" id="envNote" hidden></p>
     <p class="err" id="err"></p>
     <p class="ok" id="ok"></p>
     <form id="login">
@@ -57,6 +58,7 @@
       <fieldset>
         <legend>码流边缘分流</legend>
         <p class="meta">打开后，中国大陆用户的 HLS 走电信 ctc；关闭后全部走 Cloudflare CDN。</p>
+        <p class="meta" id="ctcHint" hidden>测试环境暂不支持</p>
         <div class="row">
           <label><input type="checkbox" id="ctc"/> 分流到 ctc</label>
         </div>
@@ -67,7 +69,7 @@
   </main>
   <script>
     const KEY = "mt_admin_token";
-    const SETUP = "http://192.168.43.111:8080/admin/setup";
+    const SETUP = "__ADMIN_SETUP_URL__";
     const errEl = document.getElementById("err");
     const okEl = document.getElementById("ok");
     const loginForm = document.getElementById("login");
@@ -144,7 +146,19 @@
       document.querySelectorAll("input[name=engine]").forEach(el => { el.checked = el.value === eng; });
       const edges = site.mediaEdges || [];
       const hasCtc = edges.some(e => e && e.id === "ctc");
-      document.getElementById("ctc").checked = !!site.mediaEdgeEnabled && hasCtc;
+      const ctc = document.getElementById("ctc");
+      const hint = document.getElementById("ctcHint");
+      const envNote = document.getElementById("envNote");
+      ctc.checked = !!site.mediaEdgeEnabled && hasCtc;
+      ctc.disabled = !!site.mediaEdgeLocked;
+      if (hint) {
+        hint.hidden = !site.mediaEdgeLocked;
+        hint.textContent = site.mediaEdgeLockReason || "测试环境暂不支持";
+      }
+      if (envNote) {
+        envNote.hidden = site.environment !== "test";
+        envNote.textContent = site.environment === "test" ? "当前为测试环境，媒体走 Cloudflare，ctc 不可用。" : "";
+      }
     }
     loginForm.addEventListener("submit", async e => {
       e.preventDefault();
@@ -178,11 +192,14 @@
     document.getElementById("save").addEventListener("click", async () => {
       showErr("");
       const engine = document.querySelector("input[name=engine]:checked")?.value || "legacy";
-      const on = document.getElementById("ctc").checked;
+      const body = { shortsEngine: engine };
+      if (!document.getElementById("ctc").disabled) {
+        body.mediaEdgeEnabled = document.getElementById("ctc").checked;
+      }
       const r = await parse(await fetch("/v1/admin/site", {
         method: "PATCH",
         headers: authHeaders(),
-        body: JSON.stringify({ shortsEngine: engine, mediaEdgeEnabled: on })
+        body: JSON.stringify(body)
       }));
       if (!r.ok) {
         if (r.status === 401) { setToken(""); location.reload(); return; }

@@ -54,15 +54,21 @@ spec:
                   apt-get install -y -qq nfs-kernel-server
                 fi
                 mkdir -p /data/minitube/uploads /data/minitube/srs-hls /data/minitube/live-hls
+                mkdir -p /data/minitube-test/uploads /data/minitube-test/srs-hls /data/minitube-test/live-hls
                 chmod 777 /data/minitube /data/minitube/uploads /data/minitube/srs-hls /data/minitube/live-hls
+                chmod 777 /data/minitube-test /data/minitube-test/uploads /data/minitube-test/srs-hls /data/minitube-test/live-hls
                 if ! grep -q '^/data/minitube ' /etc/exports 2>/dev/null; then
                   echo '/data/minitube 192.168.43.0/24(rw,sync,no_subtree_check,no_root_squash)' >> /etc/exports
+                fi
+                if ! grep -q '^/data/minitube-test ' /etc/exports 2>/dev/null; then
+                  echo '/data/minitube-test 192.168.43.0/24(rw,sync,no_subtree_check,no_root_squash)' >> /etc/exports
                 fi
                 exportfs -ra
                 systemctl enable nfs-server >/dev/null 2>&1 || true
                 systemctl restart nfs-kernel-server 2>/dev/null || systemctl restart nfs-server
                 exportfs -v
                 showmount -e 127.0.0.1 || true
+                grep -q '^/data/minitube-test ' /etc/exports && echo "exported /data/minitube-test"
               fi
               echo "nfs-prep ready on ${NODE_NAME}"
               sleep infinity
