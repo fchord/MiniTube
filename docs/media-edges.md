@@ -2,6 +2,8 @@
 
 页面与 API 仍走 `https://minitube.19121122.xyz`（Cloudflare）。大流量 HLS 按地区走国内直连边缘（一期：中国电信 `ctc`）。**应用已按本文实现**；缺省开关关闭，行为与改造前相同。
 
+测试站 `https://minitube-test.19121122.xyz` **不上 ctc**：`APP_ENV=test` 时 `mediaEdgeEnabled` 恒为 false，`PATCH` 分流返回 `media_edge_locked`，`/admin` 勾选项灰掉并提示「测试环境暂不支持」。媒体只走 Cloudflare 回测试源（8081）。见 [environments.md](environments.md)。
+
 ## 结论
 
 方向正确：HTML / JSON / 登录继续 Cloudflare；只有清单和 TS 走电信直连。播放器先拿 playback JSON 再拉 m3u8/ts，档位路径是相对的（如 `720/index.m3u8`），**master 一旦切到 ctc，分片会跟过去**。

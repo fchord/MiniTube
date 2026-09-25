@@ -16,7 +16,7 @@ make run      # API :8080
 make worker   # 另开一个终端，FFmpeg 转码
 ```
 
-进现有 k8s（含 GPU 硬编）见 [docs/deploy.md](docs/deploy.md) 与 [k8s/minitube/README.md](k8s/minitube/README.md)。第一次：`./k8s/minitube/cutover.sh`。日常只更 API：`./k8s/minitube/deploy-api.sh`。贡献与 DoD：[CONTRIBUTING.md](CONTRIBUTING.md)。
+进现有 k8s（含 GPU 硬编）见 [docs/deploy.md](docs/deploy.md) 与 [k8s/minitube/README.md](k8s/minitube/README.md)。生产 vs 测试：[docs/environments.md](docs/environments.md)。第一次生产：`./k8s/minitube/cutover.sh`。第一次测试：`./k8s/minitube-test/bootstrap.sh`。日常只更 API：`ENV=prod|test ./k8s/minitube/deploy-api.sh`。贡献与 DoD：[CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 配置
 
@@ -35,7 +35,7 @@ cp .env.example .env
 | [api/](api/) | Go 业务 API |
 | [web/](web/) | 独立 Web 主站（SEO / 分享 / 嵌入） |
 | [app/](app/) | Flutter 多端应用 |
-| [k8s/](k8s/) | 集群：GPU plugin 与 MiniTube 工作负载 |
+| [k8s/](k8s/) | 集群：生产 `minitube/`、测试 `minitube-test/` |
 
 ## 分期（摘要）
 

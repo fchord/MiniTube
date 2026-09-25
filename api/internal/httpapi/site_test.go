@@ -160,3 +160,44 @@ func TestEdgeHostAllowsMediaOnly(t *testing.T) {
 		t.Fatalf("edge host /v1/me: %d", mres.StatusCode)
 	}
 }
+
+func TestTestEnvLocksMediaEdge(t *testing.T) {
+	t.Setenv("APP_ENV", "test")
+	h := setup(t)
+	pub := do(t, h.ts, http.MethodGet, "/v1/public/site", "", nil)
+	if pub.StatusCode != 200 || pub.str("environment") != "test" || pub.bool("mediaEdgeEnabled") {
+		t.Fatalf("public: %d %s", pub.StatusCode, pub.body)
+	}
+	if !pub.bool("mediaEdgeLocked") || pub.str("mediaEdgeLockReason") != "测试环境暂不支持" {
+		t.Fatalf("lock fields: %s", pub.body)
+	}
+	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+	alice := mustRegister(t, h, "tedge"+suffix, "tedge"+suffix+"@example.com", "password12")
+	t.Setenv("ADMIN_USER_IDS", alice.str("user", "id"))
+	h2 := setup(t)
+	got := do(t, h2.ts, http.MethodPatch, "/v1/admin/site", alice.str("accessToken"), map[string]any{
+		"mediaEdgeEnabled": true,
+	})
+	if got.StatusCode != http.StatusBadRequest || got.str("code") != "media_edge_locked" {
+		t.Fatalf("patch edge: %d %s", got.StatusCode, got.body)
+	}
+	ok := do(t, h2.ts, http.MethodPatch, "/v1/admin/site", alice.str("accessToken"), map[string]any{
+		"shortsEngine": "webcodecs",
+	})
+	if ok.StatusCode != 200 || ok.str("shortsEngine") != "webcodecs" || ok.bool("mediaEdgeEnabled") {
+		t.Fatalf("patch engine: %d %s", ok.StatusCode, ok.body)
+	}
+}
+
+func TestAdminPageSetupURL(t *testing.T) {
+	t.Setenv("APP_ENV", "test")
+	t.Setenv("ADMIN_SETUP_URL", "http://192.168.43.111:8081/admin/setup")
+	h := setup(t)
+	got := do(t, h.ts, http.MethodGet, "/admin", "", nil)
+	if got.StatusCode != 200 || !strings.Contains(got.body, "http://192.168.43.111:8081/admin/setup") {
+		t.Fatalf("/admin setup url: %d %s", got.StatusCode, got.body)
+	}
+	if strings.Contains(got.body, "__ADMIN_SETUP_URL__") {
+		t.Fatal("placeholder left in admin.html")
+	}
+}

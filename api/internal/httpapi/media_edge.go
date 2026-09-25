@@ -20,6 +20,9 @@ func (s *Server) mediaEdgeState(ctx context.Context) (enabled bool, edges []medi
 	if s == nil || s.store == nil {
 		return enabled, edges
 	}
+	if s.cfg.IsTest() {
+		return false, edges
+	}
 	if v, err := s.store.GetSiteSetting(ctx, "media_edge_enabled"); err == nil {
 		enabled = strings.EqualFold(strings.TrimSpace(v), "on")
 	}

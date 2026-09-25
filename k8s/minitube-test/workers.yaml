@@ -1,0 +1,64 @@
+# Test transcode: worker2 NVENC only. Do not request nvidia.com/gpu so this
+# Pod can share the card with prod minitube-worker-nvenc-w2.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minitube-worker-nvenc-w2
+  namespace: minitube-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minitube-worker
+      rank: "1"
+  template:
+    metadata:
+      labels:
+        app: minitube-worker
+        rank: "1"
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        kubernetes.io/hostname: k8s-worker2
+      containers:
+        - name: worker
+          image: minitube/worker-nvenc:local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: minitube
+            - secretRef:
+                name: minitube
+          env:
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,video,utility
+            - name: TRANSCODE_ENCODER
+              value: h264_nvenc
+            - name: TRANSCODE_PRESET
+              value: hq
+            - name: TRANSCODE_RANK
+              value: "1"
+            - name: TRANSCODE_MAX_HEIGHT
+              value: "1080"
+            - name: TRANSCODE_WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          command: ["/bin/sh", "-c"]
+          args:
+            - export DATABASE_URL="postgres://minitube:${POSTGRES_PASSWORD}@minitube-pg:5432/minitube?sslmode=disable"; exec /usr/local/bin/minitube-worker
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 4Gi
+          volumeMounts:
+            - name: media
+              mountPath: /data
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: minitube-media

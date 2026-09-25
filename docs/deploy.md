@@ -2,7 +2,7 @@
 
 以仓库脚本和当前 homelab 实际操作为准。文档与脚本冲突时，改文档或改脚本并在 PR 里说明，不要留两套步骤。
 
-公网站点：`https://minitube.19121122.xyz`（Cloudflare 回源 `192.168.43.111:8080`）。
+公网站点：`https://minitube.19121122.xyz`（Cloudflare 回源 `192.168.43.111:8080`）。测试站见 [environments.md](environments.md)：`https://minitube-test.19121122.xyz` 回源 **8081**。
 
 ## 前提
 
@@ -11,10 +11,10 @@
 | 开发机 | 能 `kubectl` 到本集群；能 `docker` 编镜像；Go 1.23+（编 API / worker） |
 | `GOPROXY` | 国内默认 `https://goproxy.cn,direct` |
 | 集群 | 三节点：`k8s-master` `192.168.43.111`、`k8s-worker2` `192.168.43.131`（NFS + GPU）、`k8s-worker1`（QSV，NotReady 时 worker 会 Pending） |
-| 共享盘 | worker2 内核 NFS 导出 `/data/minitube`，PVC `minitube-media` 挂到 API `/data` |
+| 共享盘 | worker2 内核 NFS 导出 `/data/minitube`（生产）与 `/data/minitube-test`（测试），各挂自己的 PVC |
 | 镜像 | 不拉取 Docker Hub 的 ffmpeg。`bundle-ffmpeg.py` 把本机 `ffmpeg`/`ffprobe` 打进 `dist/ffmpeg-bundle`，再 `COPY` 进 `ubuntu:22.04` |
 | 密钥 | 只放 k8s Secret / 本地 `.env`，**不要提交**。可复制模板 [`.env.example`](../.env.example)，清单 [config.md](config.md)。`.gitignore` 已忽略 `.env`、`data/`、`dist/` |
-| 本机端口 | compose Postgres 映射 **5433**；k8s API 用 master **hostPort 8080 / 18080**，与本机 `make run` 抢 8080 |
+| 本机端口 | compose Postgres 映射 **5433**；生产 API master **hostPort 8080 / 18080**；测试 API **8081**、测试 SRS **1936** |
 
 NVIDIA 用户态必须与内核模块同版本。worker2 若 `unattended-upgrades` 升了驱动未重启，NVENC Pod 会 CrashLoop（`Driver/library version mismatch`）。修法：重启该节点（NFS 会抖一下）。
 
@@ -62,29 +62,41 @@ API 只跑在 `k8s-master` 的 `hostPort: 8080`。日常改页面/引擎用下�
 
 ```bash
 chmod +x k8s/minitube/deploy-api.sh
-./k8s/minitube/deploy-api.sh
-# 跳过测试：SKIP_TEST=1 ./k8s/minitube/deploy-api.sh
+ENV=prod ./k8s/minitube/deploy-api.sh
+# 测试环境：ENV=test ./k8s/minitube/deploy-api.sh
+# 跳过测试：SKIP_TEST=1 ENV=prod ./k8s/minitube/deploy-api.sh
 ```
+
+不设 `ENV` 会直接退出，避免误打生产。测试环境第一次用 `./k8s/minitube-test/bootstrap.sh`，见 [environments.md](environments.md)。
+
+`deploy-api.sh` **不** apply ConfigMap。仓库里生产 ConfigMap 若只多了 `APP_ENV: prod`，集群未 apply 时进程仍是缺省 `dev`；`IsTest()` 仅认 `test`，ctc 行为与 `prod` 相同。下次改生产配置时再：
+
+```bash
+kubectl apply -f k8s/minitube/configmap.yaml
+ENV=prod ./k8s/minitube/deploy-api.sh
+```
+
+（新环境变量要等 API Pod 重建才进进程。）
 
 等价手工步骤：
 
 1. `cd api && go test ./internal/httpapi`（需能连 `DATABASE_URL`，默认 `127.0.0.1:5433`）
 2. `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/minitube-api ./cmd/api`
 3. 若没有 `dist/ffmpeg-bundle`，跑 `python3 k8s/minitube/bundle-ffmpeg.py`
-4. `docker build -f k8s/minitube/Dockerfile.api -t minitube/api:local .`
-5. `docker save minitube/api:local -o /tmp/minitube-images/minitube-api.tar`
+4. `docker build -f k8s/minitube/Dockerfile.api -t minitube/api:local .`（测试打 `minitube/api:test`）
+5. `docker save` 对应 tag 到 `/tmp/minitube-images/minitube-api.tar`
 6. 特权 Job：`nsenter` + `ctr -n k8s.io images import` 打进 **k8s-master**
-7. `kubectl -n minitube rollout restart deploy/minitube-api`
-8. **hostPort 死锁**：新 Pod `Pending`、旧 Pod 仍 `Running` 时，只删**重启前记下的那个旧 Pod**，不要循环删新 Pod
-9. 验证：`http://192.168.43.111:8080/healthz` 与 `https://minitube.19121122.xyz/healthz` 为 **204**；若改了嵌入页，看 HTML 里 `?v=` 是否新版本
+7. `kubectl -n minitube rollout restart deploy/minitube-api`（测试用 `-n minitube-test`）
+8. **hostPort 死锁**：新 Pod `Pending`、旧 Pod 仍 `Running` 时，只删**该 namespace 里重启前记下的那个旧 Pod**，不要循环删新 Pod
+9. 验证：生产 `http://192.168.43.111:8080/healthz` 与 `https://minitube.19121122.xyz/healthz` 为 **204**；测试打 **8081** 与 `https://minitube-test.19121122.xyz/healthz`。若改了嵌入页，看 HTML 里 `?v=` 是否新版本
 
 同时更新 worker 镜像才跑 `./k8s/minitube/build-images.sh`，再 `kubectl -n minitube rollout restart deploy -l app=minitube-worker`。
 
 ## 站点管理
 
 - 公网 `/admin`：口令 + TOTP；登录按 IP 限频（每分钟最多 8 次，连续 3 次错误锁定）。
-- `/admin/setup`（改口令、绑/换 Authenticator）**只允许局域网** `http://192.168.43.111:8080/admin/setup`。经 Cloudflare 或公网域名访问为 404。
-- 管理页可写 `shorts_engine`（`legacy` / `webcodecs`）和 ctc 码流分流开关，热生效，见 [media-edges.md](media-edges.md)。
+- `/admin/setup`（改口令、绑/换 Authenticator）**只允许局域网**：生产 `http://192.168.43.111:8080/admin/setup`，测试 `:8081`。经 Cloudflare 或公网域名访问为 404。
+- 管理页可写 `shorts_engine`（`legacy` / `webcodecs`）。ctc 仅生产可开；测试环境选项灰掉并提示「测试环境暂不支持」，见 [media-edges.md](media-edges.md)、[environments.md](environments.md)。
 
 ## 探活
 

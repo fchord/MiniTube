@@ -1,4 +1,4 @@
-.PHONY: up down run worker test docker-images k8s-cutover deploy-api
+.PHONY: up down run worker test docker-images k8s-cutover k8s-test deploy-api
 
 up:
 	mkdir -p api/data/srs-hls api/data/live-hls
@@ -22,5 +22,9 @@ docker-images:
 k8s-cutover:
 	./k8s/minitube/cutover.sh
 
+k8s-test:
+	./k8s/minitube-test/bootstrap.sh
+
 deploy-api:
-	./k8s/minitube/deploy-api.sh
+	@test "$(ENV)" = "prod" -o "$(ENV)" = "test" || (echo "ENV=prod|test required"; exit 1)
+	ENV=$(ENV) ./k8s/minitube/deploy-api.sh

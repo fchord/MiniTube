@@ -21,11 +21,20 @@ func (s *Server) siteJSON(r *http.Request) map[string]any {
 		engine = "legacy"
 	}
 	enabled, edges := s.mediaEdgeState(r.Context())
+	env := s.cfg.AppEnv
+	if env == "" {
+		env = "dev"
+	}
 	out := map[string]any{
+		"environment":      env,
 		"shortsEngine":     engine,
 		"mediaEdgeEnabled": enabled,
 		"mediaEdges":       edges,
 		"mediaHint":        countryHint(r),
+	}
+	if s.cfg.IsTest() {
+		out["mediaEdgeLocked"] = true
+		out["mediaEdgeLockReason"] = "测试环境暂不支持"
 	}
 	return out
 }
@@ -71,6 +80,10 @@ func (s *Server) patchAdminSite(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, err)
 			return
 		}
+	}
+	if (req.MediaEdges != nil || req.MediaEdgeEnabled != nil) && s.cfg.IsTest() {
+		writeError(w, http.StatusBadRequest, "media_edge_locked", "测试环境暂不支持")
+		return
 	}
 	if req.MediaEdges != nil {
 		edges, err := parseMediaEdgesJSON(req.MediaEdges)

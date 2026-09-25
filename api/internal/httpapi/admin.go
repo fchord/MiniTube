@@ -450,7 +450,13 @@ func (s *Server) EnsureAdmin(ctx context.Context) error {
 }
 
 func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
-	s.servePage(w, "admin.html", "")
+	setup := strings.TrimSpace(s.cfg.AdminSetupURL)
+	if setup == "" {
+		setup = "http://192.168.43.111:8080/admin/setup"
+	}
+	s.servePageEx(w, "admin.html", "", map[string]string{
+		"__ADMIN_SETUP_URL__": setup,
+	})
 }
 
 func (s *Server) adminSetupPage(w http.ResponseWriter, r *http.Request) {
