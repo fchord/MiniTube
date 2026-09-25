@@ -82,7 +82,7 @@ func x264Args(src string, rung ladderRung, preset string) []string {
 
 func nvencArgs(src string, rung ladderRung, preset string) []string {
 	// CPU decode + CPU scale: GTX 960 只有 2GB，CUDA 解码容易 OOM。
-	return append([]string{
+	return []string{
 		"-y", "-i", src,
 		"-vf", fmt.Sprintf("scale=-2:%d", rung.Height),
 		"-c:v", encNVENC, "-preset", preset, "-rc", "vbr",
@@ -90,7 +90,7 @@ func nvencArgs(src string, rung ladderRung, preset string) []string {
 		"-maxrate", fmt.Sprintf("%dk", rung.VideoK*2),
 		"-bufsize", fmt.Sprintf("%dk", rung.VideoK*3),
 		"-g", "48", "-bf", "0", "-pix_fmt", "yuv420p",
-	})
+	}
 }
 
 func qsvArgs(src string, rung ladderRung, preset string) []string {

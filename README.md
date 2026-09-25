@@ -18,6 +18,8 @@ make worker   # 另开一个终端，FFmpeg 转码
 
 进现有 k8s（含 GPU 硬编）见 [docs/deploy.md](docs/deploy.md) 与 [k8s/minitube/README.md](k8s/minitube/README.md)。生产 vs 测试：[docs/environments.md](docs/environments.md)。第一次生产：`./k8s/minitube/cutover.sh`。第一次测试：`./k8s/minitube-test/bootstrap.sh`。日常只更 API：`ENV=prod ./k8s/minitube/deploy-api.sh`（测试 `ENV=test`；勾选 [docs/release-checklist.md](docs/release-checklist.md)）。探活：[docs/ops.md](docs/ops.md)。贡献与 DoD：[CONTRIBUTING.md](CONTRIBUTING.md)。
 
+改了 `api/` 的 PR / 推到 `main` 会跑 GitHub Actions（`go vet` + `go test`，带 Postgres）。结果在该提交或 PR 的 Checks 页；工作流 [`.github/workflows/api.yml`](.github/workflows/api.yml)。暂不强制 checks 全绿才能合。
+
 ## 配置
 
 ```bash

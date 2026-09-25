@@ -9,6 +9,8 @@ Issue 与里程碑在 GitHub Project 上跟踪。动手前从最新 `main` 开�
 - 不要直接推 `main`。合入由仓库维护者操作。
 - 不要 `--force` 推已分享的分支。
 
+改了 `api/` 时 GitHub Actions 会跑 `go vet` / `go test`（见 PR 的 Checks）。先保证绿，暂不在 Ruleset 里强制必过。
+
 ## Definition of Done
 
 合入前对得上这些：

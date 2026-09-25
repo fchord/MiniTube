@@ -1,0 +1,54 @@
+# Minimal gate: Go module under api/. No npm/Flutter jobs.
+name: api
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api/**"
+      - ".github/workflows/api.yml"
+  pull_request:
+    paths:
+      - "api/**"
+      - ".github/workflows/api.yml"
+
+concurrency:
+  group: api-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: minitube
+          POSTGRES_PASSWORD: minitube
+          POSTGRES_DB: minitube
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U minitube -d minitube"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://minitube:minitube@127.0.0.1:5432/minitube?sslmode=disable
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+      - name: Install ffmpeg
+        working-directory: .
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test ./...

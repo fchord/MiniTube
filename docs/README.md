@@ -19,3 +19,5 @@
 | [roadmap.md](roadmap.md) | Phase 0→2 为 MVP，短视频/直播后置 |
 | [schema.sql](schema.sql) | PostgreSQL 表结构（与 `api/internal/db/schema.sql` 同步） |
 | [openapi.yaml](openapi.yaml) | HTTP API（OpenAPI 3.1） |
+
+GitHub Actions：改 `api/` 时跑 `go vet` / `go test`，见仓库根 README 与 [`.github/workflows/api.yml`](../.github/workflows/api.yml)。
