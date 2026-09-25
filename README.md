@@ -18,6 +18,15 @@ make worker   # 另开一个终端，FFmpeg 转码
 
 进现有 k8s（含 GPU 硬编）见 [docs/deploy.md](docs/deploy.md) 与 [k8s/minitube/README.md](k8s/minitube/README.md)。第一次：`./k8s/minitube/cutover.sh`。日常只更 API：`./k8s/minitube/deploy-api.sh`。贡献与 DoD：[CONTRIBUTING.md](CONTRIBUTING.md)。
 
+## 配置
+
+```bash
+cp .env.example .env
+# 按需改 PUBLIC_BASE_URL、JWT_SECRET 等；密钥不要提交
+```
+
+变量含义、缺省值、本机 vs 集群见 [docs/config.md](docs/config.md)。`.env` 已被 git 忽略。
+
 ## 仓库布局
 
 | 目录 | 用途 |

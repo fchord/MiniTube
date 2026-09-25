@@ -16,6 +16,6 @@ make up
 cd api && go run ./cmd/api
 ```
 
-环境变量见 [`.env.example`](../.env.example)。开发环境验证邮件 token 打在日志里；测试使用内存 mailbox。
+环境变量见 [`.env.example`](../.env.example) 与 [docs/config.md](../docs/config.md)。开发环境验证邮件 token 打在日志里；测试使用内存 mailbox。
 
 头像直传走本服务 `PUT /v1/uploads/{token}`（本地磁盘），公开地址 `GET /v1/media/...`。Phase 2 再换成 S3 预签名。
