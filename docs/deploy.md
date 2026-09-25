@@ -107,3 +107,5 @@ ENV=prod ./k8s/minitube/deploy-api.sh
 - `curl -sS -o /dev/null -w "%{http_code}\n" http://192.168.43.111:8080/healthz` → `204`
 - 公网首页 `200`
 - 若改了 shorts/页面：对应 `?v=` 与手测路径通过
+
+日常发布勾选清单：[release-checklist.md](release-checklist.md)。

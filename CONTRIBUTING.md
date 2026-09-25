@@ -18,6 +18,7 @@ Issue 与里程碑在 GitHub Project 上跟踪。动手前从最新 `main` 开�
 - [ ] 相关测试通过：API 至少 `cd api && go test ./internal/httpapi`（需本机 Postgres `5433`，可用 `make up`）
 - [ ] 相关手测做过（改了页面就打开对应路由；改了部署就打 `healthz`）
 - [ ] 文档与仓库脚本、实际 homelab 步骤一致
+- [ ] 本次若包含部署：按 [docs/release-checklist.md](docs/release-checklist.md) 勾过发布前/后
 - [ ] **无明文密钥、口令、证书私钥进库**（用 Secret / `.env`；模板只放 `.env.example`）
 - [ ] shorts 引擎或嵌入页改完：版本号已 bump，并按 [deploy.md](docs/deploy.md) 日常 API 路径部署（`ENV=prod` 或 `ENV=test`）、验证 `?v=`
 
