@@ -43,6 +43,8 @@ ENV=prod ./k8s/minitube/deploy-api.sh
 
 ### 服务就绪
 
+细则与「healthz 证明不了什么」见 [ops.md](ops.md)。
+
 - [ ] `kubectl -n minitube get pods -l app=minitube-api -o wide`：1 个 Running，节点 `k8s-master`
 - [ ] 源站 `curl -sS -o /dev/null -w "%{http_code}\n" http://192.168.43.111:8080/healthz` → `204`（3s 内；`/healthz` 不应依赖 Postgres）
 - [ ] 公网 `https://minitube.19121122.xyz/healthz` → `204`

@@ -100,7 +100,7 @@ ENV=prod ./k8s/minitube/deploy-api.sh
 
 ## 探活
 
-`minitube-api` 的 readiness 打 `/healthz`，超时 3s。该路径不应依赖 Postgres。页面 HTML 不经库；`GET /v1/public/site` 仍读库。
+见 [ops.md](ops.md)。`minitube-api` 的 readiness 打 `GET /healthz`（**204**，超时 3s，不查库）。页面 HTML 不经库；`GET /v1/public/site` 仍读库。
 
 ## 验收（部署本身）
 
@@ -108,4 +108,4 @@ ENV=prod ./k8s/minitube/deploy-api.sh
 - 公网首页 `200`
 - 若改了 shorts/页面：对应 `?v=` 与手测路径通过
 
-日常发布勾选清单：[release-checklist.md](release-checklist.md)。
+日常发布勾选清单：[release-checklist.md](release-checklist.md)。如何确认就绪：[ops.md](ops.md)。
