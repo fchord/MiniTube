@@ -1,6 +1,6 @@
 # 运维可见性：健康检查与确认方式
 
-先「能确认活着」，不做完整监控栈。发布时勾 [release-checklist.md](release-checklist.md) 里引用本节的项。
+先「能确认活着」，不做完整监控栈。发布时勾 [release-checklist.md](release-checklist.md) 里引用本节的项。公网主机名与 [deploy.md](deploy.md)、[environments.md](environments.md)、[config.md](config.md) 一致：`minitube.19121122.xyz` / `minitube-test.19121122.xyz`（仓库是公开 homelab，不用占位域名）。
 
 ## API：`GET /healthz`
 
@@ -39,7 +39,9 @@ kubectl -n minitube get pods -o wide
 | `minitube-api` | 1 个 Running，节点 `k8s-master` | 再打上表 `healthz` |
 | `minitube-pg-0` | Running | 读库：`curl -sS -m 8 https://minitube.19121122.xyz/v1/public/site` 应是 JSON（`shortsEngine` 等）。500/超时 = 库或站点设置 |
 | `minitube-srs` | Running，生产占 **1935**、测试 **1936** | 推流能否连上；HLS 是否出片 |
-| `minitube-worker-nvenc-w2` | Running，节点 `k8s-worker2` | 日志里有 `transcode worker registered`；库表 `transcode_workers.last_seen` 约 2s 更新。测试 worker 不申请 `nvidia.com/gpu` |
+| `minitube-worker-nvenc-w2` | Running，节点 `k8s-worker2` | rank 1。日志 `transcode worker registered`；`transcode_workers.last_seen` 约 2s 更新。测试环境默认只有这一份 NVENC，且不申请 `nvidia.com/gpu` |
+| `minitube-worker-nvenc-master` | 生产 Running，节点 `k8s-master` | rank 2，最高 720p。测试环境没有这个 Deployment |
+| 其它 `app=minitube-worker` | `kubectl -n minitube get pods -l app=minitube-worker` | 生产还有 QSV：`qsv-w2` 可 Running；`qsv-w1` 在 worker1 NotReady 时 Pending 正常 |
 | NFS | API Pod 能 `ls /data/uploads` | 生产 `/data/minitube`，测试 `/data/minitube-test`。不要为排障去 apply `nfs-prep.yaml`（会重启 nfsd） |
 
 日志：
