@@ -28,7 +28,7 @@ chmod +x k8s/minitube-test/bootstrap.sh k8s/minitube/deploy-api.sh
 ./k8s/minitube-test/bootstrap.sh
 ```
 
-脚本会：在 worker2 上导出 `/data/minitube-test`（不动 `/data/minitube`）→ namespace / ResourceQuota / LimitRange / 独立 Secret → PVC / Postgres / API / SRS:1936 / NVENC worker → `ENV=test` 编 `minitube/api:test` 并 import → 探活 `:8081`。`limits.cpu` 由 LimitRange 补默认值，否则配额会拒建 Pod。
+脚本会：在 worker2 上导出 `/data/minitube-test`（不动 `/data/minitube`）→ namespace / ResourceQuota / LimitRange / 独立 Secret → PVC / Postgres / API / SRS:1936 / NVENC worker → `ENV=test` 编 `minitube/api:test` 并 import → 探活 `:8081`。`limits.cpu` 由 LimitRange 补默认值，否则配额会拒建 Pod。已有集群上把 `sync` 改成 `async`、或改 PV `actimeo`，bootstrap **不会**改已存在的 exports 行，步骤见 [ops.md](ops.md)「已有集群改 NFS」。
 
 种管理口令（不要用生产口令）：
 

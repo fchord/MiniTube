@@ -12,7 +12,7 @@ spec:
     - nfsvers=4.2
     - hard
     - noatime
-    - actimeo=0
+    - actimeo=10
   nfs:
     server: 192.168.43.131
     path: /data/minitube

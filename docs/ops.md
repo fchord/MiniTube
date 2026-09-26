@@ -53,6 +53,42 @@ kubectl -n minitube logs -l app=minitube-worker --tail=80 --prefix
 
 开发环境验证邮件 token 打在 API 日志 `verification email (dev)`。
 
+## 已有集群改 NFS（导出 async、actimeo）
+
+仓库里的 [`k8s/minitube/nfs-prep.yaml`](../k8s/minitube/nfs-prep.yaml) 和 [`k8s/minitube-test/bootstrap.sh`](../k8s/minitube-test/bootstrap.sh) 都是：**`/etc/exports` 里还没有这一行才追加**。worker2 上早就有 `sync` 那一行时，把脚本改成 `async` 再 merge **等于没改导出**。
+
+**不要**为了让导出生效去 `kubectl apply -f k8s/minitube/nfs-prep.yaml`。那个 DaemonSet 会 `systemctl restart nfs-kernel-server`，生产 **hard** 挂载会卡住（[#13](https://github.com/fchord/MiniTube/issues/13)）。
+
+在 **k8s-worker2** 上改已有行，只重新加载导出、不重启 nfsd：
+
+```bash
+sudo sed -i '/^\/data\/minitube /s/,sync,/,async,/' /etc/exports
+sudo sed -i '/^\/data\/minitube-test /s/,sync,/,async,/' /etc/exports
+grep -E '^/data/minitube' /etc/exports
+sudo exportfs -ra
+sudo exportfs -v | grep minitube
+```
+
+期望两行都是 `(rw,async,...)`。`exportfs -v` 里应看到 `async`。
+
+PV 的 `actimeo` 写在 [`k8s/minitube/pvc.yaml`](../k8s/minitube/pvc.yaml) / [`k8s/minitube-test/pvc.yaml`](../k8s/minitube-test/pvc.yaml) 的 `mountOptions`。`kubectl apply` 之后 **只对新挂载生效**；这套 NFSv4 **不能**靠 `mount -o remount,actimeo=…` 改已有挂载。相关 Pod 要重建一次，例如：
+
+```bash
+kubectl apply -f k8s/minitube/pvc.yaml
+kubectl apply -f k8s/minitube-test/pvc.yaml
+# 测试（生产把 -n 换成 minitube，并只滚动实际用了媒体 PVC 的 deploy）
+kubectl -n minitube-test rollout restart deploy/minitube-worker-nvenc-w2 deploy/minitube-api deploy/minitube-srs
+```
+
+API / SRS 带 **hostPort** 时，新 Pod 可能 `Pending`、旧 Pod 仍 `Running`：只删该环境里那个旧 Running Pod，见 [deploy.md](deploy.md)。
+
+核对客户端已是 10 秒属性缓存（`actimeo=10` 会显示成 `acregmin=10,acregmax=10,...`）：
+
+```bash
+# 在已挂载该 PVC 的节点上
+findmnt -t nfs,nfs4 -n -o TARGET,SOURCE,OPTIONS | grep minitube
+```
+
 ## 和 `/healthz` 的差别
 
 | 检查 | 证明什么 |

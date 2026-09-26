@@ -58,12 +58,14 @@ YML
 }
 
 echo ">> export /data/minitube-test on worker2 (exportfs -ra only; do not apply nfs-prep.yaml — that DaemonSet restarts nfs-kernel-server and stalls prod hard mounts)"
+# If /etc/exports already has the minitube-test line (even with sync), this
+# block will not change it. Flip sync→async with sed + exportfs -ra; docs/ops.md.
 hostexec k8s-worker2 minitube-test-nfs-export "$(cat <<'EOF'
 set -euo pipefail
 mkdir -p /data/minitube-test/uploads /data/minitube-test/srs-hls /data/minitube-test/live-hls
 chmod 777 /data/minitube-test /data/minitube-test/uploads /data/minitube-test/srs-hls /data/minitube-test/live-hls
 if ! grep -q '^/data/minitube-test ' /etc/exports 2>/dev/null; then
-  echo '/data/minitube-test 192.168.43.0/24(rw,sync,no_subtree_check,no_root_squash)' >> /etc/exports
+  echo '/data/minitube-test 192.168.43.0/24(rw,async,no_subtree_check,no_root_squash)' >> /etc/exports
 fi
 exportfs -ra
 showmount -e 127.0.0.1

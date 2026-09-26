@@ -1,5 +1,11 @@
 # Privileged prep: nfs-common on every node; kernel NFS export on k8s-worker2.
 # Media lives at hostPath /data/minitube on worker2, shared as NFS to API/workers/SRS.
+#
+# The grep/append below does not rewrite an existing export line. On a live
+# node that already has (rw,sync,...), merging this file does nothing until
+# you sed those lines and exportfs -ra — see docs/ops.md. Do not re-apply
+# this DaemonSet to flip sync→async: it restarts nfs-kernel-server and stalls
+# production hard mounts.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -58,10 +64,10 @@ spec:
                 chmod 777 /data/minitube /data/minitube/uploads /data/minitube/srs-hls /data/minitube/live-hls
                 chmod 777 /data/minitube-test /data/minitube-test/uploads /data/minitube-test/srs-hls /data/minitube-test/live-hls
                 if ! grep -q '^/data/minitube ' /etc/exports 2>/dev/null; then
-                  echo '/data/minitube 192.168.43.0/24(rw,sync,no_subtree_check,no_root_squash)' >> /etc/exports
+                  echo '/data/minitube 192.168.43.0/24(rw,async,no_subtree_check,no_root_squash)' >> /etc/exports
                 fi
                 if ! grep -q '^/data/minitube-test ' /etc/exports 2>/dev/null; then
-                  echo '/data/minitube-test 192.168.43.0/24(rw,sync,no_subtree_check,no_root_squash)' >> /etc/exports
+                  echo '/data/minitube-test 192.168.43.0/24(rw,async,no_subtree_check,no_root_squash)' >> /etc/exports
                 fi
                 exportfs -ra
                 systemctl enable nfs-server >/dev/null 2>&1 || true
