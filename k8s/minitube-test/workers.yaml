@@ -51,9 +51,10 @@ spec:
             - export DATABASE_URL="postgres://minitube:${POSTGRES_PASSWORD}@minitube-pg:5432/minitube?sslmode=disable"; exec /usr/local/bin/minitube-worker
           resources:
             requests:
-              cpu: 250m
-              memory: 512Mi
+              cpu: 1000m
+              memory: 1024Mi
             limits:
+              cpu: "6"
               memory: 4Gi
           volumeMounts:
             - name: media

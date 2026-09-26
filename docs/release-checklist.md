@@ -13,6 +13,7 @@
 - [ ] shorts / 嵌入页若有改：`staticAssetVersion` 已 bump
 - [ ] 若改了 `k8s/minitube/configmap.yaml`：`deploy-api.sh` **不会** apply ConfigMap，须另跑 `kubectl apply -f k8s/minitube/configmap.yaml`（Pod 重建后变量才进进程）
 - [ ] **不要**对已在跑的生产集群 `kubectl apply -f k8s/minitube/nfs-prep.yaml`：DaemonSet 重建会 `systemctl restart nfs-kernel-server`，生产 **hard** NFS 会卡住
+- [ ] 若这次改了 NFS **导出**（`sync`/`async`）或 PV **`actimeo`**：合进 main **不会**改 worker2 上已有的 `/etc/exports` 行，也不会给已挂载的 Pod 换客户端选项。按 [ops.md](ops.md) 的「已有集群改 NFS」做 `sed` + `exportfs -ra`，再 `kubectl apply` PV 并 rollout 使用该盘的 Pod
 
 ### 构建产物
 
