@@ -46,7 +46,7 @@ func calibrate(ctx context.Context, preset string) *SpeedModel {
 		return m
 	}
 	defer os.RemoveAll(dir)
-	for _, r := range ladder {
+	for _, r := range avcLadder {
 		if ctx.Err() != nil {
 			return m
 		}

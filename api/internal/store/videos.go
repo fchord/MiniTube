@@ -566,6 +566,36 @@ func (p *Postgres) IncrementViews(ctx context.Context, id string) error {
 	return err
 }
 
+type PlaybackClientReport struct {
+	VideoID         string
+	UserID          *uuid.UUID
+	Page            string
+	OS              string
+	OSVersion       string
+	Browser         string
+	BrowserVersion  string
+	HWCodecs        []string
+	UserAgent       string
+	Payload         []byte
+}
+
+func (p *Postgres) InsertPlaybackClientReport(ctx context.Context, r PlaybackClientReport) error {
+	if len(r.HWCodecs) == 0 {
+		r.HWCodecs = []string{}
+	}
+	if len(r.Payload) == 0 {
+		r.Payload = []byte("{}")
+	}
+	_, err := p.pool.Exec(ctx, `
+		INSERT INTO playback_client_reports (
+			video_id, user_id, page, os, os_version, browser, browser_version,
+			hw_codecs, user_agent, payload
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		r.VideoID, r.UserID, r.Page, r.OS, r.OSVersion, r.Browser, r.BrowserVersion,
+		r.HWCodecs, r.UserAgent, r.Payload)
+	return err
+}
+
 func (p *Postgres) OwnerHasProcessing(ctx context.Context, ownerID uuid.UUID) (bool, error) {
 	var ok bool
 	err := p.pool.QueryRow(ctx, `

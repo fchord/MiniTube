@@ -48,7 +48,7 @@ Web 与 Flutter **只共享 API 与设计 token**，不共享 Flutter Widget 树
 
 ## 播放协议
 
-- 点播：HLS。桌面/Web 后期可并行 DASH。
+- 点播：HLS，**分片容器固定 MPEG-TS**（各端共用）。Web Chromium 在浏览器内 TS→fMP4 再喂 MSE，见 [`longform-hls.md`](longform-hls.md)。
 - 直播：先 HLS / LL-HLS；低延迟再上 WebRTC。
 - 多音轨 / 多字幕：HLS `AUDIO` / `SUBTITLES` 组，与视频档位解耦。
 

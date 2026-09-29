@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-//go:embed schema.sql 002.sql 003.sql 004.sql 005.sql 006.sql 007.sql 008.sql 009.sql 010.sql 011.sql 012.sql 013.sql 014.sql
+//go:embed schema.sql 002.sql 003.sql 004.sql 005.sql 006.sql 007.sql 008.sql 009.sql 010.sql 011.sql 012.sql 013.sql 014.sql 015.sql 016.sql
 var schemaFS embed.FS
 
 func Connect(ctx context.Context, url string) (*pgxpool.Pool, error) {
@@ -79,6 +79,12 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	if err := apply(ctx, pool, "014", "014.sql"); err != nil {
+		return err
+	}
+	if err := apply(ctx, pool, "015", "015.sql"); err != nil {
+		return err
+	}
+	if err := apply(ctx, pool, "016", "016.sql"); err != nil {
 		return err
 	}
 	return nil

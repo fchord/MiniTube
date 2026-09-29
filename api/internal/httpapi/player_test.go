@@ -61,12 +61,33 @@ func TestPlayerAssetsEmbedded(t *testing.T) {
 	if strings.Contains(body, "[data-click]") || strings.Contains(body, "data-click") {
 		t.Fatal("player.js still toggles playback on video tap")
 	}
+	if !strings.Contains(body, "hevcFallbackTried") || !strings.Contains(body, `\/hevc\/`) || !strings.Contains(body, `"/avc/"`) {
+		t.Fatal("player.js missing HEVC→AVC HLS fallback")
+	}
+	if !strings.Contains(body, "mtTsFmp4") {
+		t.Fatal("player.js should use mtTsFmp4 for HEVC TS→fMP4")
+	}
+	if !strings.Contains(body, "switchHold") || !strings.Contains(body, "holdClock") || !strings.Contains(body, "clockTime") {
+		t.Fatal("player.js missing quality-switch clock hold")
+	}
+	if !strings.Contains(body, "tsCtl.seek") {
+		t.Fatal("player.js should seek through ts-fmp4, not only video.currentTime")
+	}
+	if !strings.Contains(body, "beginAudioGate") || !strings.Contains(body, "endAudioGate") || !strings.Contains(body, "masterGain") {
+		t.Fatal("player.js missing seek audio gate to flush leftover PCM")
+	}
+	if !strings.Contains(body, `prefs.quality === "auto" && shownH`) || !strings.Contains(body, `自动 (" + shownH + "p)`) {
+		t.Fatal("player.js should annotate auto quality only when auto is selected")
+	}
+	if !strings.Contains(body, "fmtRatio") || !strings.Contains(body, `spec.id === "original"`) {
+		t.Fatal("player.js missing original aspect source-ratio label")
+	}
 	html := string(page)
 	if strings.Contains(html, "controls") {
 		t.Fatal("watch.html still uses native controls")
 	}
-	if !strings.Contains(html, "/static/player.js") || !strings.Contains(html, "mtPlayer.mount") || !strings.Contains(html, "media-edge.js") {
-		t.Fatal("watch.html does not mount custom player")
+	if !strings.Contains(html, "width: meta.width") || !strings.Contains(html, "height: meta.height") {
+		t.Fatal("watch.html should pass source width/height to the player")
 	}
 	if !strings.Contains(html, "@media (max-width: 640px)") || !strings.Contains(html, "padding: 0 0 16px") {
 		t.Fatal("watch.html should edge-to-edge the player on narrow phones")

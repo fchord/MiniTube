@@ -8,6 +8,8 @@
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js"></script>
   <script src="/static/token.js"></script>
   <script src="/static/media-edge.js"></script>
+  <script src="/static/client-cap.js"></script>
+  <script src="/static/ts-fmp4.js"></script>
   <style>
     :root { color-scheme: dark; }
     html, body {
@@ -355,9 +357,40 @@
       return window.mtAuth && window.mtAuth.hlsConfig ? window.mtAuth.hlsConfig(extra) : extra;
     }
     function attach(video, url) {
-      if (video._hls && video._src === url) return Promise.resolve();
+      if ((video._hls || video._ts) && video._src === url) return Promise.resolve();
       teardown(video, false);
       return new Promise((resolve, reject) => {
+        if (url.indexOf("/hevc/") >= 0 && window.mtTsFmp4 && window.MediaSource) {
+          let settled = false;
+          function ok() {
+            if (settled) return;
+            settled = true;
+            resolve();
+          }
+          const headers = {};
+          const tok = token();
+          if (tok) headers.Authorization = "Bearer " + tok;
+          const ctl = window.mtTsFmp4.play({
+            video: video,
+            src: url,
+            headers: headers,
+            height: 2160,
+            onLevels: ok,
+            onError: function (e) {
+              if (settled) return;
+              settled = true;
+              try { ctl.destroy(); } catch (x) {}
+              video._ts = null;
+              const avc = url.replace(/\/hevc\//, "/avc/");
+              if (avc !== url) attach(video, avc).then(resolve, reject);
+              else reject(e || new Error("hevc"));
+            }
+          });
+          video._ts = ctl;
+          video._src = url;
+          video.addEventListener("loadedmetadata", ok, { once: true });
+          return;
+        }
         const extra = {
           enableWorker: true,
           maxBufferLength: 8,
@@ -401,6 +434,7 @@
       if (!video) return;
       if (!forgetTime) video._t = video.currentTime || video._t || 0;
       if (video._hls) { video._hls.destroy(); video._hls = null; }
+      if (video._ts) { video._ts.destroy(); video._ts = null; }
       video.pause();
       video.removeAttribute("src");
       video.load();
@@ -411,7 +445,9 @@
     async function playbackURL(id) {
       if (pbMemo[id]) return pbMemo[id];
       pbMemo[id] = (async function () {
-        const pb = await getJSON("/v1/videos/" + id + "/playback");
+        const pb = window.mtClientCap
+          ? await window.mtClientCap.fetchPlayback(API, id, headers(), { page: "shorts" })
+          : await getJSON("/v1/videos/" + id + "/playback");
         if (MODE === "webcodecs") {
           let best = pb.masterPlaylistUrl;
           let h = -1;
@@ -424,7 +460,13 @@
           });
           return sameOriginMedia(best);
         }
-        return sameOriginMedia(pb.masterPlaylistUrl);
+        // LAN HTTP is not a secure context, so WebCodecs is missing. hls.js
+        // cannot play HEVC TS; use ts-fmp4 like /watch, else fall back to AVC.
+        let master = pb.masterPlaylistUrl || "";
+        if (!(window.mtTsFmp4 && window.MediaSource)) {
+          master = String(master).replace(/\/hevc\//g, "/avc/");
+        }
+        return sameOriginMedia(master);
       })();
       try {
         return await pbMemo[id];
@@ -485,7 +527,7 @@
               return;
             }
             const v = videoEl(it.id);
-            if (v && (v._src || v._hls)) teardown(v, false);
+            if (v && (v._src || v._hls || v._ts)) teardown(v, false);
           });
           if (MODE === "webcodecs" && wc) {
             const idx = idxOf(activeId);
@@ -1083,7 +1125,7 @@
         if (!want) want = "legacy";
       }
       const can = typeof VideoDecoder === "function" && typeof AudioDecoder === "function";
-      slog("boot-check", "want=" + want, "VideoDecoder=" + can);
+      slog("boot-check", "want=" + want, "secure=" + !!window.isSecureContext, "VideoDecoder=" + (typeof VideoDecoder), "AudioDecoder=" + (typeof AudioDecoder));
       if (want === "webcodecs" && can) {
         MODE = "webcodecs";
         try {

@@ -400,18 +400,36 @@ function fail(p, msg) {
 }
 
 async function configureVideo(p, cfg) {
-  let vcfgUse = Object.assign({}, cfg, { optimizeForLatency: true });
-  if (p.preferHardware) vcfgUse.hardwareAcceleration = "prefer-hardware";
-  let okv = await VideoDecoder.isConfigSupported(vcfgUse);
-  if (!okv || !okv.supported) {
-    vcfgUse = Object.assign({}, cfg, { optimizeForLatency: true });
-    okv = await VideoDecoder.isConfigSupported(vcfgUse);
+  const tries = [];
+  function pushTry(base, hw) {
+    const next = Object.assign({}, base);
+    if (hw) next.hardwareAcceleration = "prefer-hardware";
+    tries.push(next);
   }
-  if (!okv || !okv.supported) {
-    vcfgUse = cfg;
-    okv = await VideoDecoder.isConfigSupported(vcfgUse);
+  const withLat = Object.assign({}, cfg, { optimizeForLatency: true });
+  if (p.preferHardware) {
+    pushTry(withLat, true);
+    const swapped = codecPrefixSwap(withLat);
+    if (swapped) pushTry(swapped, true);
   }
-  if (!okv || !okv.supported) throw new Error("H.264 config not supported");
+  pushTry(withLat, false);
+  const swapped = codecPrefixSwap(withLat);
+  if (swapped) pushTry(swapped, false);
+  pushTry(cfg, false);
+  let vcfgUse = null;
+  let okv = null;
+  for (let i = 0; i < tries.length; i++) {
+    try {
+      okv = await VideoDecoder.isConfigSupported(tries[i]);
+    } catch (e) {
+      okv = null;
+    }
+    if (okv && okv.supported) {
+      vcfgUse = tries[i];
+      break;
+    }
+  }
+  if (!vcfgUse) throw new Error("video config not supported " + String(cfg && cfg.codec || ""));
   if (p.vdec) {
     try { p.vdec.close(); } catch (e) {}
   }
@@ -423,7 +441,22 @@ async function configureVideo(p, cfg) {
     error: (e) => fail(p, e && e.message),
   });
   p.vdec.configure(vcfgUse);
+  self.postMessage({
+    type: "log",
+    id: p.id,
+    tag: "vdec-cfg",
+    message: String(vcfgUse.codec || "") + " hw=" + String(vcfgUse.hardwareAcceleration || "default")
+  });
   self.postMessage({ type: "decoder", action: "open", kind: "video", id: p.id, seq: p.seq });
+}
+
+function codecPrefixSwap(cfg) {
+  const c = String(cfg && cfg.codec || "");
+  let alt = "";
+  if (c.indexOf("hev1.") === 0) alt = "hvc1." + c.slice(5);
+  else if (c.indexOf("hvc1.") === 0) alt = "hev1." + c.slice(5);
+  if (!alt) return null;
+  return Object.assign({}, cfg, { codec: alt });
 }
 
 async function configureAudio(p, cfg) {

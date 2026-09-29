@@ -22,7 +22,7 @@ spec:
         kubernetes.io/hostname: k8s-worker2
       containers:
         - name: worker
-          image: minitube/worker-nvenc:local
+          image: minitube/worker-nvenc:test
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
@@ -41,7 +41,7 @@ spec:
             - name: TRANSCODE_RANK
               value: "1"
             - name: TRANSCODE_MAX_HEIGHT
-              value: "1080"
+              value: "2160"
             - name: TRANSCODE_WORKER_ID
               valueFrom:
                 fieldRef:

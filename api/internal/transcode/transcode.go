@@ -21,21 +21,14 @@ import (
 	"minitube/api/internal/store"
 )
 
-type ladderRung struct {
-	Height, VideoK, AudioK, Bandwidth int
-}
-
-var ladder = []ladderRung{
-	{360, 800, 96, 900_000},
-	{720, 2500, 128, 2_800_000},
-	{1080, 5000, 160, 5_500_000},
-}
-
 type probe struct {
-	Width, Height int
-	DurationMs    int
-	HasAudio      bool
-	HasSubs       bool
+	Width, Height     int
+	DurationMs        int
+	HasAudio          bool
+	HasSubs           bool
+	AudioCodec        string
+	AudioChannels     int
+	AudioBitrateKbps  int
 }
 
 func persistCtx() (context.Context, context.CancelFunc) {
@@ -86,20 +79,25 @@ func Process(ctx context.Context, st *store.Postgres, fs *storage.Local, video s
 		return fail(st, video.ID, err.Error())
 	}
 
-	rungs := pickRungs(info.Height)
+	rungs := pickRungs(info.Width, info.Height)
 	var renditions []store.Rendition
 	enc := activeEncoder()
 	preset := encodePreset(enc)
-	heights := make([]int, len(rungs))
+	labels := make([]string, len(rungs))
 	for i, r := range rungs {
-		heights[i] = r.Height
+		labels[i] = r.Label()
 	}
-	writeProgress(outDir, heights, 0, 0)
+	writeProgress(outDir, labels, 0, 0, rungs[0])
 	slog.Info("transcode start",
 		"id", video.ID, "durationMs", info.DurationMs, "size", fmt.Sprintf("%dx%d", info.Width, info.Height),
-		"rungs", heights, "encoder", enc, "preset", preset)
+		"rungs", labels, "encoder", enc, "preset", preset)
+
+	hevcSkipped := false
 	for i, rung := range rungs {
-		rel := filepath.ToSlash(filepath.Join(outPrefix, strconv.Itoa(rung.Height)))
+		if hevcSkipped && rung.Family == familyHEVC {
+			continue
+		}
+		rel := filepath.ToSlash(filepath.Join(outPrefix, rung.DirName(), strconv.Itoa(rung.Height)))
 		abs, err := fs.Abs(rel)
 		if err != nil {
 			return fail(st, video.ID, err.Error())
@@ -112,36 +110,41 @@ func Process(ctx context.Context, st *store.Postgres, fs *storage.Local, video s
 			Height:       rung.Height,
 			BandwidthBps: rung.Bandwidth,
 			PlaylistKey:  rel + "/index.m3u8",
-			Codec:        "avc1",
+			Codec:        rung.Codec,
 		}
 		if rungComplete(abs, info.DurationMs) {
-			slog.Info("transcode skip rung", "id", video.ID, "height", rung.Height)
-			writeProgress(outDir, heights, i, 1)
+			slog.Info("transcode skip rung", "id", video.ID, "label", rung.Label())
+			writeProgress(outDir, labels, i, 1, rung)
 			renditions = append(renditions, item)
 			continue
 		}
-		args := videoEncodeArgs(src, rung)
-		if info.HasAudio {
-			args = append(args, "-c:a", "aac", "-b:a", fmt.Sprintf("%dk", rung.AudioK), "-ac", "2")
-		} else {
-			args = append(args, "-an")
-		}
-		args = append(args, hlsTail(filepath.Join(abs, "seg_%03d.ts"), playlist)...)
-		slog.Info("transcode rung", "id", video.ID, "height", rung.Height, "encoder", enc)
-		writeProgress(outDir, heights, i, 0)
-		if err := runFFmpegProgress(ctx, args, info.DurationMs, func(ratio float64) {
-			writeProgress(outDir, heights, i, ratio)
+		writeProgress(outDir, labels, i, 0, rung)
+		slog.Info("transcode rung", "id", video.ID, "label", rung.Label(), "encoder", enc)
+		if err := encodeVideoRung(ctx, src, info, rung, abs, playlist, func(ratio float64) {
+			writeProgress(outDir, labels, i, ratio, rung)
 		}); err != nil {
 			if wrapped := wrapFFmpegErr(err); errors.Is(wrapped, ErrHWUnavailable) {
 				return wrapped
 			}
+			if rung.Family == familyHEVC && skipHEVC(err.Error()) {
+				slog.Warn("transcode skip remaining hevc", "id", video.ID, "err", err)
+				hevcSkipped = true
+				continue
+			}
+			if rung.Family == familyHEVC {
+				slog.Warn("transcode skip hevc rung", "id", video.ID, "label", rung.Label(), "err", err)
+				continue
+			}
 			return fail(st, video.ID, err.Error())
 		}
-		writeProgress(outDir, heights, i, 1)
+		writeProgress(outDir, labels, i, 1, rung)
 		renditions = append(renditions, item)
 	}
+	if len(renditions) == 0 {
+		return fail(st, video.ID, "no renditions")
+	}
 
-	if err := writeMaster(filepath.Join(outDir, "master.m3u8"), renditions, info); err != nil {
+	if err := writeFamilyMasters(outDir, renditions, info); err != nil {
 		return fail(st, video.ID, err.Error())
 	}
 
@@ -156,8 +159,13 @@ func Process(ctx context.Context, st *store.Postgres, fs *storage.Local, video s
 			return fail(st, video.ID, err.Error())
 		}
 		if !rungComplete(aAbs, info.DurationMs) {
-			args := audioHLSArgs(src, filepath.Join(aAbs, "index.m3u8"), filepath.Join(aAbs, "seg_%03d.ts"), 128)
-			if err := runFFmpeg(ctx, args); err != nil {
+			copyA := shouldCopyAudio(info, 128)
+			args := audioHLSArgs(src, filepath.Join(aAbs, "index.m3u8"), filepath.Join(aAbs, "seg_%03d.ts"), 128, copyA)
+			if err := runFFmpeg(ctx, args); err != nil && copyA {
+				args = audioHLSArgs(src, filepath.Join(aAbs, "index.m3u8"), filepath.Join(aAbs, "seg_%03d.ts"), 128, false)
+				err = runFFmpeg(ctx, args)
+			}
+			if err != nil {
 				return fail(st, video.ID, err.Error())
 			}
 		}
@@ -213,6 +221,40 @@ func Process(ctx context.Context, st *store.Postgres, fs *storage.Local, video s
 	return err
 }
 
+func encodeVideoRung(ctx context.Context, src string, info probe, rung ladderRung, abs, playlist string, onRatio func(float64)) error {
+	seg := filepath.Join(abs, "seg_%03d.ts")
+	copyA := shouldCopyAudio(info, rung.AudioK)
+	// NVENC encode from system-memory frames. CUDA/NVDEC decode exhausts
+	// decoder surfaces on GTX 1050-class cards (No decoder surfaces left).
+	cudaTries := []bool{false}
+	var last error
+	for _, cuda := range cudaTries {
+		for {
+			args := videoEncodeArgs(src, rung, info.Width, info.Height, info.HasAudio, copyA, cuda)
+			args = append(args, hlsTail(seg, playlist)...)
+			last = runFFmpegProgress(ctx, args, info.DurationMs, onRatio)
+			if last == nil {
+				return nil
+			}
+			if copyA {
+				copyA = false
+				continue
+			}
+			break
+		}
+		if last == nil {
+			return nil
+		}
+		if cuda && cudaSoftFail(last.Error()) {
+			slog.Warn("transcode cuda fallback", "label", rung.Label(), "err", last)
+			copyA = shouldCopyAudio(info, rung.AudioK)
+			continue
+		}
+		return last
+	}
+	return last
+}
+
 func rungComplete(dir string, durationMs int) bool {
 	st, err := os.Stat(filepath.Join(dir, "index.m3u8"))
 	if err != nil || st.Size() < 16 {
@@ -229,42 +271,75 @@ func rungComplete(dir string, durationMs int) bool {
 	return len(matches) >= need
 }
 
-func pickRungs(srcH int) []ladderRung {
-	return pickRungsCapped(srcH, maxEncodeHeight())
-}
-
-func pickRungsCapped(srcH, maxH int) []ladderRung {
-	var out []ladderRung
-	for _, r := range ladder {
-		if srcH >= r.Height && r.Height <= maxH {
-			out = append(out, r)
+func writeFamilyMasters(outDir string, renditions []store.Rendition, info probe) error {
+	avc := filterCodec(renditions, "avc1")
+	hevc := filterCodec(renditions, "hvc1")
+	if len(avc) > 0 {
+		if err := writeMaster(filepath.Join(outDir, "avc", "master.m3u8"), avc, info); err != nil {
+			return err
+		}
+		if err := writeMasterPrefixed(filepath.Join(outDir, "master.m3u8"), avc, info, "avc"); err != nil {
+			return err
 		}
 	}
-	if len(out) == 0 {
-		h := srcH
-		if h%2 != 0 {
-			h--
+	if len(hevc) > 0 {
+		if err := writeMaster(filepath.Join(outDir, "hevc", "master.m3u8"), hevc, info); err != nil {
+			return err
 		}
-		if h < 16 {
-			h = 16
+	}
+	return nil
+}
+
+func filterCodec(rends []store.Rendition, codec string) []store.Rendition {
+	var out []store.Rendition
+	for _, r := range rends {
+		if r.Codec == codec {
+			out = append(out, r)
 		}
-		out = append(out, ladderRung{Height: h, VideoK: 400, AudioK: 96, Bandwidth: 500_000})
 	}
 	return out
 }
 
 func writeMaster(path string, renditions []store.Rendition, info probe) error {
+	return writeMasterPrefixed(path, renditions, info, "")
+}
+
+func writeMasterPrefixed(path string, renditions []store.Rendition, info probe, prefix string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n#EXT-X-VERSION:3\n")
 	for _, r := range renditions {
-		w := int(math.Round(float64(r.Height) * float64(info.Width) / math.Max(float64(info.Height), 1)))
-		if w%2 != 0 {
-			w++
+		w, h := outputSize(info.Width, info.Height, r.Height)
+		fmt.Fprintf(&b, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS=%q\n", r.BandwidthBps, w, h, streamCODECS(r))
+		rel := fmt.Sprintf("%d/index.m3u8", r.Height)
+		if prefix != "" {
+			rel = prefix + "/" + rel
 		}
-		fmt.Fprintf(&b, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS=\"avc1.4d401f,mp4a.40.2\"\n", r.BandwidthBps, w, r.Height)
-		fmt.Fprintf(&b, "%d/index.m3u8\n", r.Height)
+		b.WriteString(rel + "\n")
 	}
 	return os.WriteFile(path, []byte(b.String()), 0o644)
+}
+
+func outputSize(srcW, srcH, rungH int) (w, h int) {
+	if srcW <= 0 || srcH <= 0 {
+		return rungH, rungH
+	}
+	if isPortrait(srcW, srcH) {
+		w = rungH
+		h = int(math.Round(float64(rungH) * float64(srcH) / float64(srcW)))
+	} else {
+		h = rungH
+		w = int(math.Round(float64(rungH) * float64(srcW) / float64(srcH)))
+	}
+	if w%2 != 0 {
+		w++
+	}
+	if h%2 != 0 {
+		h++
+	}
+	return w, h
 }
 
 func ffprobe(ctx context.Context, src string) (probe, error) {
@@ -276,9 +351,11 @@ func ffprobe(ctx context.Context, src string) (probe, error) {
 	var parsed struct {
 		Streams []struct {
 			CodecType string `json:"codec_type"`
+			CodecName string `json:"codec_name"`
 			Width     int    `json:"width"`
 			Height    int    `json:"height"`
-			Duration  string `json:"duration"`
+			Channels  int    `json:"channels"`
+			BitRate   string `json:"bit_rate"`
 		} `json:"streams"`
 		Format struct {
 			Duration string `json:"duration"`
@@ -296,6 +373,13 @@ func ffprobe(ctx context.Context, src string) (probe, error) {
 			}
 		case "audio":
 			p.HasAudio = true
+			if p.AudioCodec == "" {
+				p.AudioCodec = s.CodecName
+				p.AudioChannels = s.Channels
+				if br, err := strconv.Atoi(s.BitRate); err == nil && br > 0 {
+					p.AudioBitrateKbps = br / 1000
+				}
+			}
 		case "subtitle":
 			p.HasSubs = true
 		}

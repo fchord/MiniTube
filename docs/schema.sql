@@ -3,6 +3,8 @@
 -- 本文件是迁移 001 基线：多数主键 UUID，时间 timestamptz UTC。
 -- 014 起 videos.id 改为 10 位 [A-Za-z0-9]，旧 UUID 在 video_id_legacy；评论/点赞/收藏里
 -- 指向视频的 target_id 同步为 text。见 api/internal/db/014.sql。
+-- 015 playback_client_reports：播放页上报 OS/浏览器/硬解能力。见 api/internal/db/015.sql。
+-- 016 video_renditions 唯一键改为 (video_id, height, codec)，允许同高度 AVC+HEVC。见 api/internal/db/016.sql。
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS citext;
@@ -154,7 +156,7 @@ CREATE TABLE video_renditions (
     playlist_key    text NOT NULL,
     codec           text NOT NULL DEFAULT 'avc1',
     created_at      timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (video_id, height)
+    UNIQUE (video_id, height, codec)
 );
 
 CREATE TABLE audio_tracks (

@@ -37,6 +37,13 @@ func TestShortsPlaybackPage(t *testing.T) {
 		"hover: none",
 		"sameOriginMedia",
 		"media-edge.js",
+		"client-cap.js",
+		"mtClientCap",
+		`page: "shorts"`,
+		"/static/ts-fmp4.js",
+		"height: 2160",
+		"mtTsFmp4 && window.MediaSource",
+		"mtTsFmp4",
 		"mtMedia.ready",
 		"/v1/public/site",
 		"shorts-engine.js",
@@ -92,7 +99,7 @@ func TestShortsPlaybackPage(t *testing.T) {
 	if !strings.Contains(string(ch), `query: "?ch="`) {
 		t.Fatal("channel.html should pass ch= into shorts links")
 	}
-	for _, name := range []string{"shorts-engine.js", "shorts-worklet.js", "shorts-worker.js", "shorts-decode-worker.js"} {
+	for _, name := range []string{"shorts-engine.js", "shorts-worklet.js", "shorts-worker.js", "shorts-decode-worker.js", "client-cap.js"} {
 		if _, err := watchHTML.ReadFile(name); err != nil {
 			t.Fatalf("missing %s: %v", name, err)
 		}
@@ -479,6 +486,18 @@ func TestShortsPlaybackPage(t *testing.T) {
 	if !strings.Contains(decode, "p.rawFrames") {
 		t.Fatal("decode worker should skip bitmap copy when rawFrames is set")
 	}
+	if strings.Contains(demux, "first version only supports H.264") || strings.Contains(string(bundled), "first version only supports H.264") {
+		t.Fatal("demux must accept HEVC, not only H.264")
+	}
+	if !strings.Contains(demux, `kind !== "avc" && kind !== "hevc"`) || !strings.Contains(string(bundled), `kind !== "avc" && kind !== "hevc"`) {
+		t.Fatal("demux should allow AVC and HEVC")
+	}
+	if !strings.Contains(decode, "codecPrefixSwap") || !strings.Contains(decode, "hev1.") {
+		t.Fatal("decode should retry hvc1/hev1 if the first codec string is rejected")
+	}
+	if !strings.Contains(engine, "preferHardware: true") {
+		t.Fatal("engine should prefer hardware VideoDecoder for AVC and HEVC")
+	}
 }
 
 func TestShortsHwtestPage(t *testing.T) {
@@ -503,6 +522,8 @@ func TestShortsHwtestPage(t *testing.T) {
 		"当下正常硬件解码的路数",
 		"shorts-hwtest.js",
 		"media-edge.js",
+		"client-cap.js",
+		`page: "shorts-hwtest"`,
 		".stage.ok",
 		".stage.bad",
 	} {

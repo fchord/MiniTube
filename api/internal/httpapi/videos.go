@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"embed"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -18,7 +20,7 @@ import (
 	"minitube/api/internal/transcode"
 )
 
-//go:embed watch.html user.html channel.html post.html home.html compose.html feed.html shorts.html shorts-hwtest.html live.html lives.html login.html register.html settings.html admin.html admin-setup.html account.css account.js token.js media-edge.js post-media.css post-media.js publish.html player.css player.js shorts-engine.js shorts-hwtest.js shorts-worker.js shorts-decode-worker.js shorts-worklet.js
+//go:embed watch.html user.html channel.html post.html home.html compose.html feed.html shorts.html shorts-hwtest.html live.html lives.html login.html register.html settings.html admin.html admin-setup.html account.css account.js token.js media-edge.js post-media.css post-media.js publish.html player.css player.js ts-fmp4.js shorts-engine.js shorts-hwtest.js shorts-worker.js shorts-decode-worker.js shorts-worklet.js client-cap.js
 var watchHTML embed.FS
 
 type createVideoReq struct {
@@ -385,7 +387,34 @@ func (s *Server) completeUpload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, s.videoPayload(updated, false))
 }
 
+type playbackClientHead struct {
+	Page           string   `json:"page"`
+	OS             string   `json:"os"`
+	OSVersion      string   `json:"osVersion"`
+	Browser        string   `json:"browser"`
+	BrowserVersion string   `json:"browserVersion"`
+	UA             string   `json:"ua"`
+	HWCodecs       []string `json:"hwCodecs"`
+}
+
+func readPlaybackClient(w http.ResponseWriter, r *http.Request) (json.RawMessage, playbackClientHead) {
+	var head playbackClientHead
+	if r.Method != http.MethodPost || r.Body == nil {
+		return nil, head
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
+	var req struct {
+		Client json.RawMessage `json:"client"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Client) == 0 {
+		return nil, head
+	}
+	_ = json.Unmarshal(req.Client, &head)
+	return req.Client, head
+}
+
 func (s *Server) getPlayback(w http.ResponseWriter, r *http.Request) {
+	clientRaw, clientHead := readPlaybackClient(w, r)
 	v, err := s.loadVideo(r)
 	if err != nil {
 		writeErr(w, err)
@@ -414,14 +443,28 @@ func (s *Server) getPlayback(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	masterKey := "hls/" + v.ID + "/master.m3u8"
-	if !s.uploads.Wait(r.Context(), masterKey, 8*time.Second) {
-		writeError(w, http.StatusConflict, "not_ready", "not ready")
-		return
+	avcR, hevcR := splitRenditions(rends)
+	family := "avc"
+	chosen := avcR
+	if preferHEVC(clientHead.HWCodecs) && len(hevcR) > 0 {
+		family = "hevc"
+		chosen = hevcR
+	}
+	if len(chosen) == 0 {
+		chosen = rends
+		family = "avc"
+	}
+	masterKey := "hls/" + v.ID + "/" + family + "/master.m3u8"
+	if !s.uploads.Wait(r.Context(), masterKey, 2*time.Second) {
+		masterKey = "hls/" + v.ID + "/master.m3u8"
+		if !s.uploads.Wait(r.Context(), masterKey, 6*time.Second) {
+			writeError(w, http.StatusConflict, "not_ready", "not ready")
+			return
+		}
 	}
 	_ = s.store.IncrementViews(r.Context(), v.ID)
-	rendJSON := make([]map[string]any, 0, len(rends))
-	for _, x := range rends {
+	rendJSON := make([]map[string]any, 0, len(chosen))
+	for _, x := range chosen {
 		rendJSON = append(rendJSON, map[string]any{
 			"height": x.Height, "bandwidthBps": x.BandwidthBps,
 			"playlistUrl": mediaCacheBust(s.uploads.URL(x.PlaylistKey), v.UpdatedAt), "codec": x.Codec,
@@ -442,7 +485,8 @@ func (s *Server) getPlayback(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	out := map[string]any{
-		"masterPlaylistUrl": mediaCacheBust(s.uploads.URL("hls/"+v.ID+"/master.m3u8"), v.UpdatedAt),
+		"masterPlaylistUrl": mediaCacheBust(s.uploads.URL(masterKey), v.UpdatedAt),
+		"codec":             family,
 		"renditions":        rendJSON,
 		"audioTracks":       aJSON,
 		"subtitleTracks":    sJSON,
@@ -451,6 +495,39 @@ func (s *Server) getPlayback(w http.ResponseWriter, r *http.Request) {
 	s.rewriteMediaURLList(r, rendJSON, "playlistUrl")
 	s.rewriteMediaURLList(r, aJSON, "playlistUrl")
 	s.rewriteMediaURLList(r, sJSON, "vttUrl")
+	if len(clientRaw) > 0 {
+		var parsed any
+		if json.Unmarshal(clientRaw, &parsed) == nil {
+			out["client"] = parsed
+		}
+		ua := clientHead.UA
+		if ua == "" {
+			ua = r.UserAgent()
+		}
+		slog.Info("playback client",
+			"video", v.ID,
+			"page", clientHead.Page,
+			"os", clientHead.OS,
+			"osVersion", clientHead.OSVersion,
+			"browser", clientHead.Browser,
+			"browserVersion", clientHead.BrowserVersion,
+			"hwCodecs", clientHead.HWCodecs,
+			"playbackCodec", family,
+			"ua", ua,
+		)
+		_ = s.store.InsertPlaybackClientReport(r.Context(), store.PlaybackClientReport{
+			VideoID:        v.ID,
+			UserID:         viewerID(r),
+			Page:           clientHead.Page,
+			OS:             clientHead.OS,
+			OSVersion:      clientHead.OSVersion,
+			Browser:        clientHead.Browser,
+			BrowserVersion: clientHead.BrowserVersion,
+			HWCodecs:       clientHead.HWCodecs,
+			UserAgent:      ua,
+			Payload:        clientRaw,
+		})
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -629,4 +706,32 @@ func (s *Server) listChannelVideosReal(w http.ResponseWriter, r *http.Request) {
 		out = append(out, s.videoJSONOf(v, liked))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+func preferHEVC(hw []string) bool {
+	for _, c := range hw {
+		x := strings.ToLower(strings.TrimSpace(c))
+		if x == "hevc" || x == "h265" || x == "h.265" {
+			return true
+		}
+	}
+	return false
+}
+
+func splitRenditions(rends []store.Rendition) (avc, hevc []store.Rendition) {
+	for _, r := range rends {
+		c := strings.ToLower(r.Codec)
+		if strings.HasPrefix(c, "hvc") || strings.HasPrefix(c, "hev") {
+			hevc = append(hevc, r)
+		} else {
+			avc = append(avc, r)
+		}
+	}
+	if avc == nil {
+		avc = []store.Rendition{}
+	}
+	if hevc == nil {
+		hevc = []store.Rendition{}
+	}
+	return avc, hevc
 }

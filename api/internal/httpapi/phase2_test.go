@@ -141,7 +141,7 @@ func TestPhase2VOD(t *testing.T) {
 	}
 
 	page := do(t, h.ts, http.MethodGet, "/watch/"+videoID, "", nil)
-	if page.StatusCode != 200 || !strings.Contains(page.body, "hls.js") || !strings.Contains(page.body, "player.js") {
+	if page.StatusCode != 200 || !strings.Contains(page.body, "player.js") || !strings.Contains(page.body, "ts-fmp4.js") {
 		t.Fatalf("watch page: %d", page.StatusCode)
 	}
 	pub := do(t, h.ts, http.MethodGet, "/publish?channel="+chID+"&kind=long", "", nil)
