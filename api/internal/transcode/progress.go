@@ -1,29 +1,39 @@
 package transcode
 
 import (
-	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"minitube/api/internal/storage"
 	"minitube/api/internal/store"
 )
 
 type JobProgress struct {
-	Rungs   []int   `json:"rungs"`
-	Index   int     `json:"index"`
-	Ratio   float64 `json:"ratio"`
-	Percent float64 `json:"percent"`
+	Rungs   []string `json:"rungs"`
+	Index   int      `json:"index"`
+	Ratio   float64  `json:"ratio"`
+	Percent float64  `json:"percent"`
+	Codec   string   `json:"codec,omitempty"`
+	Height  int      `json:"height,omitempty"`
 }
 
-func LadderHeights(srcH int) []int {
-	rungs := pickRungs(srcH)
-	out := make([]int, len(rungs))
+func LadderHeights(srcW, srcH int) []int {
+	rungs := pickRungs(srcW, srcH)
+	out := make([]int, 0, len(rungs))
+	for _, r := range rungs {
+		out = append(out, r.Height)
+	}
+	return out
+}
+
+func LadderLabels(srcW, srcH int) []string {
+	rungs := pickRungs(srcW, srcH)
+	out := make([]string, len(rungs))
 	for i, r := range rungs {
-		out[i] = r.Height
+		out[i] = r.Label()
 	}
 	return out
 }
@@ -31,18 +41,27 @@ func LadderHeights(srcH int) []int {
 func (p JobProgress) Map() map[string]any {
 	rungs := p.Rungs
 	if rungs == nil {
-		rungs = []int{}
+		rungs = []string{}
 	}
-	return map[string]any{
+	m := map[string]any{
 		"rungs":   rungs,
 		"index":   p.Index,
 		"ratio":   p.Ratio,
 		"percent": p.Percent,
 	}
+	if p.Codec != "" {
+		m["codec"] = p.Codec
+	}
+	if p.Height > 0 {
+		m["height"] = p.Height
+	}
+	return m
 }
 
-func writeProgress(dir string, rungs []int, index int, ratio float64) {
+func writeProgress(dir string, rungs []string, index int, ratio float64, cur ladderRung) {
 	p := makeProgress(rungs, index, ratio)
+	p.Codec = cur.Label()
+	p.Height = cur.Height
 	b, err := json.Marshal(p)
 	if err != nil {
 		return
@@ -54,7 +73,7 @@ func writeProgress(dir string, rungs []int, index int, ratio float64) {
 	_ = os.Rename(tmp, filepath.Join(dir, "progress.json"))
 }
 
-func makeProgress(rungs []int, index int, ratio float64) JobProgress {
+func makeProgress(rungs []string, index int, ratio float64) JobProgress {
 	if ratio < 0 {
 		ratio = 0
 	}
@@ -66,7 +85,7 @@ func makeProgress(rungs []int, index int, ratio float64) JobProgress {
 	}
 	n := len(rungs)
 	if n == 0 {
-		return JobProgress{Rungs: []int{}, Ratio: ratio, Percent: ratio * 100}
+		return JobProgress{Rungs: []string{}, Ratio: ratio, Percent: ratio * 100}
 	}
 	if index >= n {
 		index = n - 1
@@ -86,83 +105,50 @@ func InspectProgress(fs *storage.Local, v store.Video) JobProgress {
 			if cached := readProgressFile(dir); len(cached.Rungs) > 0 {
 				p.Rungs = cached.Rungs
 				p.Index = len(cached.Rungs) - 1
+				if cached.Codec != "" {
+					p.Codec = cached.Codec
+				} else if n := len(p.Rungs); n > 0 {
+					p.Codec = p.Rungs[n-1]
+				}
+				p.Height = cached.Height
 			} else {
-				p.Rungs = listHeightDirs(dir)
+				p.Rungs = listRungLabels(dir)
 				if n := len(p.Rungs); n > 0 {
 					p.Index = n - 1
+					p.Codec = p.Rungs[n-1]
 				}
 			}
 		}
 		return p
 	}
 	if v.Status != "processing" {
-		return JobProgress{Rungs: []int{}}
+		return JobProgress{Rungs: []string{}}
 	}
 	dir, err := fs.Abs(filepath.ToSlash(filepath.Join("hls", v.ID)))
 	if err != nil {
-		return JobProgress{Rungs: []int{}}
+		return JobProgress{Rungs: []string{}}
 	}
 	p := readProgressFile(dir)
-	durMs := 0
-	if v.DurationMs != nil {
-		durMs = *v.DurationMs
+	if len(p.Rungs) > 0 {
+		out := makeProgress(p.Rungs, p.Index, p.Ratio)
+		out.Codec = p.Codec
+		out.Height = p.Height
+		if out.Codec == "" && out.Index >= 0 && out.Index < len(p.Rungs) {
+			out.Codec = p.Rungs[out.Index]
+		}
+		return out
 	}
-	srcH := 0
+	srcW, srcH := 0, 0
+	if v.Width != nil {
+		srcW = *v.Width
+	}
 	if v.Height != nil {
 		srcH = *v.Height
 	}
-	if (len(p.Rungs) == 0 || durMs == 0) && v.SourceObjectKey != nil {
-		if src, err := fs.Abs(*v.SourceObjectKey); err == nil {
-			if info, err := ffprobe(context.Background(), src); err == nil {
-				if srcH == 0 {
-					srcH = info.Height
-				}
-				if durMs == 0 {
-					durMs = info.DurationMs
-				}
-			}
-		}
-	}
-	if len(p.Rungs) == 0 {
-		if srcH > 0 {
-			p.Rungs = LadderHeights(srcH)
-		} else {
-			p.Rungs = listHeightDirs(dir)
-		}
-	}
-	if len(p.Rungs) == 0 {
-		return p
-	}
-	expected := durationSegs(durMs)
-	if expected == 0 {
-		for _, h := range p.Rungs {
-			sub := filepath.Join(dir, strconv.Itoa(h))
-			b, err := os.ReadFile(filepath.Join(sub, "index.m3u8"))
-			if err == nil && strings.Contains(string(b), "EXT-X-ENDLIST") {
-				if n := countSegs(sub); n > expected {
-					expected = n
-				}
-			}
-		}
-	}
-	idx, ratio := 0, 0.0
-	for i, h := range p.Rungs {
-		sub := filepath.Join(dir, strconv.Itoa(h))
-		r := diskRungRatio(sub, expected)
-		if r >= 0.999 {
-			idx, ratio = i, 1
-			continue
-		}
-		idx = i
-		if r > 0 {
-			ratio = r
-		} else {
-			ratio = 0
-		}
-		break
-	}
-	if disk := makeProgress(p.Rungs, idx, ratio); disk.Percent >= p.Percent {
-		return disk
+	if srcW == 0 || srcH == 0 {
+		p.Rungs = listRungLabels(dir)
+	} else {
+		p.Rungs = LadderLabels(srcW, srcH)
 	}
 	return makeProgress(p.Rungs, p.Index, p.Ratio)
 }
@@ -179,11 +165,14 @@ func readProgressFile(dir string) JobProgress {
 	return p
 }
 
-func listHeightDirs(dir string) []int {
-	var out []int
-	for _, h := range []int{360, 720, 1080} {
-		if dirExists(filepath.Join(dir, strconv.Itoa(h))) {
-			out = append(out, h)
+func listRungLabels(dir string) []string {
+	var out []string
+	type fam struct{ dir, lab string }
+	for _, f := range []fam{{"avc", "H.264"}, {"hevc", "H.265"}} {
+		for _, h := range []int{2160, 1440, 1080, 720, 480, 360, 240, 144} {
+			if dirExists(filepath.Join(dir, f.dir, strconv.Itoa(h))) {
+				out = append(out, fmt.Sprintf("%s %dp", f.lab, h))
+			}
 		}
 	}
 	return out
@@ -192,36 +181,4 @@ func listHeightDirs(dir string) []int {
 func dirExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && st.IsDir()
-}
-
-func countSegs(dir string) int {
-	matches, _ := filepath.Glob(filepath.Join(dir, "seg_*.ts"))
-	return len(matches)
-}
-
-func durationSegs(durationMs int) int {
-	if durationMs <= 0 {
-		return 0
-	}
-	n := durationMs / 4000
-	if n < 1 {
-		return 1
-	}
-	return n
-}
-
-func diskRungRatio(dir string, expected int) float64 {
-	b, err := os.ReadFile(filepath.Join(dir, "index.m3u8"))
-	if err == nil && strings.Contains(string(b), "EXT-X-ENDLIST") {
-		return 1
-	}
-	n := countSegs(dir)
-	if n == 0 || expected < 1 {
-		return 0
-	}
-	r := float64(n) / float64(expected)
-	if r > 1 {
-		return 1
-	}
-	return r
 }

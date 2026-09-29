@@ -372,7 +372,7 @@ func (s *Server) feedPage(w http.ResponseWriter, r *http.Request) {
 	s.servePage(w, "feed.html", "")
 }
 
-const staticAssetVersion = "20260925a"
+const staticAssetVersion = "20260929u"
 
 func (s *Server) servePage(w http.ResponseWriter, file, slot string) {
 	s.servePageEx(w, file, slot, nil)
@@ -393,7 +393,7 @@ func (s *Server) servePageEx(w http.ResponseWriter, file, slot string, extra map
 		page = strings.Replace(page, "</head>", `<script src="/static/token.js"></script>
 </head>`, 1)
 	}
-	for _, name := range []string{"account.js", "account.css", "token.js", "media-edge.js", "post-media.js", "post-media.css", "player.js", "player.css", "shorts-engine.js", "shorts-worker.js", "shorts-decode-worker.js", "shorts-worklet.js", "shorts-hwtest.js"} {
+	for _, name := range []string{"account.js", "account.css", "token.js", "media-edge.js", "client-cap.js", "post-media.js", "post-media.css", "player.js", "player.css", "ts-fmp4.js", "shorts-engine.js", "shorts-worker.js", "shorts-decode-worker.js", "shorts-worklet.js", "shorts-hwtest.js"} {
 		page = strings.ReplaceAll(page, "/static/"+name, "/static/"+name+"?v="+staticAssetVersion)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

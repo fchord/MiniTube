@@ -47,6 +47,29 @@
     return !!el.isContentEditable;
   }
   function canHlsJs() { return !!(w.Hls && Hls.isSupported()); }
+  function slog() {
+    try { console.log.apply(console, ["[mt-player]"].concat([].slice.call(arguments))); } catch (e) {}
+  }
+  function ensureHlsJs(cb) {
+    if (canHlsJs()) { cb(true); return; }
+    if (w.Hls) { cb(false); return; }
+    if (w.__mtHlsWait) { w.__mtHlsWait.push(cb); return; }
+    w.__mtHlsWait = [cb];
+    let done = false;
+    function finish(ok) {
+      if (done) return;
+      done = true;
+      const q = w.__mtHlsWait || [];
+      w.__mtHlsWait = null;
+      q.forEach(function (fn) { try { fn(ok); } catch (e) {} });
+    }
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js";
+    s.onload = function () { finish(!!(w.Hls && Hls.isSupported())); };
+    s.onerror = function () { slog("hls.js load fail"); finish(false); };
+    document.head.appendChild(s);
+    setTimeout(function () { if (!w.Hls) slog("hls.js timeout"); finish(!!(w.Hls && Hls.isSupported())); }, 4000);
+  }
   function isCoarseMobile() {
     try {
       if (!(w.matchMedia && w.matchMedia("(pointer: coarse)").matches)) return false;
@@ -170,6 +193,8 @@
     if (SPEEDS.indexOf(Number(prefs.speed)) < 0) prefs.speed = 1;
 
     let hls = null;
+    let tsCtl = null;
+    let hevcFallbackTried = false;
     let renditions = [];
     let metaW = 0;
     let metaH = 0;
@@ -180,9 +205,12 @@
     let attachedUrl = "";
     let startAt = 0;
     let wantPlay = false;
+    let vodDuration = 0;
     let onTimeupdateCb = null;
     let onHlsError = null;
     let scrubTime = null;
+    let switchHold = null;
+    let lastClock = 0;
     let quietIdle = false;
     let recentTouch = 0;
     let tapTimer = 0;
@@ -194,6 +222,9 @@
     let mediaSrc = null;
     let dryGain = null;
     let wetGain = null;
+    let masterGain = null;
+    let audioGate = null;
+    let audioGateTimer = 0;
     const listeners = [];
 
     function on(el, ev, fn, opts) {
@@ -226,9 +257,18 @@
       return !root.classList.contains("is-idle") || menuOpen();
     }
     function sourceRatio() {
-      if (video.videoWidth && video.videoHeight) return video.videoWidth / video.videoHeight;
       if (metaW && metaH) return metaW / metaH;
+      if (video.videoWidth && video.videoHeight) return video.videoWidth / video.videoHeight;
       return 16 / 9;
+    }
+    function fmtRatio(r) {
+      if (!(r > 0) || !isFinite(r)) return "";
+      const pairs = [[16, 9], [4, 3], [16, 10], [21, 9], [3, 2], [1, 1], [9, 16], [3, 4], [2, 1]];
+      for (let i = 0; i < pairs.length; i++) {
+        const a = pairs[i][0], b = pairs[i][1];
+        if (Math.abs(r - a / b) < 0.03) return a + ":" + b;
+      }
+      return (Math.round(r * 100) / 100) + ":1";
     }
     function applyAspect() {
       const spec = ASPECTS.find(function (a) { return a.id === prefs.aspect; }) || ASPECTS[0];
@@ -244,6 +284,12 @@
       speedBtn.textContent = fmtSpeed(prefs.speed);
     }
     function applyQuality() {
+      if (tsCtl && tsCtl.setHeight) {
+        if (prefs.quality === "auto") return;
+        holdClock();
+        tsCtl.setHeight(Number(prefs.quality));
+        return;
+      }
       if (!hls) return;
       if (prefs.quality === "auto") {
         hls.capLevelToPlayerSize = true;
@@ -260,7 +306,7 @@
         hls.currentLevel = -1;
       }
     }
-    function canManualQuality() { return !!hls; }
+    function canManualQuality() { return !!hls || !!tsCtl; }
 
     function ensureAudio() {
       if (mediaSrc) {
@@ -282,12 +328,15 @@
         makeup.gain.value = 1.2;
         dryGain = audioCtx.createGain();
         wetGain = audioCtx.createGain();
+        masterGain = audioCtx.createGain();
+        masterGain.gain.value = 1;
         mediaSrc.connect(dryGain);
         mediaSrc.connect(comp);
         comp.connect(makeup);
         makeup.connect(wetGain);
-        dryGain.connect(audioCtx.destination);
-        wetGain.connect(audioCtx.destination);
+        dryGain.connect(masterGain);
+        wetGain.connect(masterGain);
+        masterGain.connect(audioCtx.destination);
         audioCtx.resume().catch(function () {});
         applyCompressor();
         return true;
@@ -301,15 +350,59 @@
       dryGain.gain.value = prefs.compressor ? 0 : 1;
       wetGain.gain.value = prefs.compressor ? 1 : 0;
     }
+    function beginAudioGate() {
+      if (!audioGate) audioGate = { vol: video.volume, muted: video.muted };
+      else audioGate.armed = false;
+      clearTimeout(audioGateTimer);
+      audioGateTimer = 0;
+      if (masterGain && audioCtx) {
+        try {
+          const t = audioCtx.currentTime;
+          masterGain.gain.cancelScheduledValues(t);
+          masterGain.gain.setValueAtTime(0, t);
+        } catch (e) {}
+      }
+      try { video.muted = true; } catch (e) {}
+      try { video.volume = 0; } catch (e) {}
+    }
+    function endAudioGate() {
+      if (!audioGate || audioGate.armed) return;
+      const t = video.currentTime || 0;
+      if (video.seeking) return;
+      if (t < 0.15 && ((switchHold != null && switchHold > 0.5) || (scrubTime != null && scrubTime > 0.5))) return;
+      audioGate.armed = true;
+      const saved = audioGate;
+      clearTimeout(audioGateTimer);
+      audioGateTimer = setTimeout(function () {
+        if (audioGate !== saved) return;
+        audioGate = null;
+        audioGateTimer = 0;
+        if (masterGain && audioCtx) {
+          try {
+            const at = audioCtx.currentTime;
+            masterGain.gain.cancelScheduledValues(at);
+            masterGain.gain.setValueAtTime(0, at);
+            masterGain.gain.linearRampToValueAtTime(1, at + 0.05);
+          } catch (e) {}
+        }
+        video.muted = saved.muted;
+        video.volume = saved.vol;
+        setMuteUi();
+      }, 120);
+    }
 
     function heights() {
       const set = {};
-      renditions.forEach(function (r) {
-        if (r && r.height) set[r.height] = true;
-      });
-      if (hls) {
+      const lv = tsCtl && tsCtl.levels ? tsCtl.levels() : null;
+      if (lv && lv.length) {
+        lv.forEach(function (l) { if (l && l.height) set[l.height] = true; });
+      } else if (hls && hls.levels && hls.levels.length) {
         hls.levels.forEach(function (l) {
           if (l.height) set[l.height] = true;
+        });
+      } else {
+        renditions.forEach(function (r) {
+          if (r && r.height) set[r.height] = true;
         });
       }
       return Object.keys(set).map(Number).sort(function (a, b) { return b - a; });
@@ -325,7 +418,8 @@
       const manual = canManualQuality();
       let q = '<div class="mt-menu-label">清晰度</div>';
       const autoOn = prefs.quality === "auto" || !manual || hs.indexOf(Number(prefs.quality)) < 0;
-      const autoLabel = autoHeight && autoOn ? "自动 (" + autoHeight + "p)" : "自动";
+      const shownH = (tsCtl && tsCtl.height && tsCtl.height()) || autoHeight;
+      const autoLabel = prefs.quality === "auto" && shownH ? "自动 (" + shownH + "p)" : "自动";
       q += '<button type="button" data-q="auto" class="' + (autoOn ? "is-on" : "") + '">' + autoLabel + "</button>";
       hs.forEach(function (h) {
         const on = manual && Number(prefs.quality) === h ? " is-on" : "";
@@ -335,7 +429,12 @@
       let a = '<div class="mt-menu-label mt-menu-sep">显示比例</div>';
       ASPECTS.forEach(function (spec) {
         const on = prefs.aspect === spec.id ? " is-on" : "";
-        a += '<button type="button" data-ar="' + spec.id + '" class="' + on.trim() + '">' + spec.label + "</button>";
+        let lab = spec.label;
+        if (spec.id === "original") {
+          const src = fmtRatio(sourceRatio());
+          if (src) lab += " (" + src + ")";
+        }
+        a += '<button type="button" data-ar="' + spec.id + '" class="' + on.trim() + '">' + lab + "</button>";
       });
       const mir = prefs.mirror ? " is-on" : "";
       const cmp = prefs.compressor ? " is-on" : "";
@@ -421,6 +520,7 @@
       return edge;
     }
     function mediaDuration() {
+      if (!liveMode && vodDuration > 1) return vodDuration;
       let end = liveEdge();
       const d = video.duration;
       if (isFinite(d) && d > 0) end = Math.max(end, d);
@@ -453,6 +553,18 @@
         liveTick = 0;
       }
     }
+    function clockTime() {
+      if (switchHold != null) return switchHold;
+      if (scrubTime != null) return scrubTime;
+      const t = video.currentTime || 0;
+      if (t > 0.05) return t;
+      return lastClock || 0;
+    }
+    function holdClock() {
+      const now = clockTime();
+      if (now > 0.05) switchHold = now;
+      updateProgress();
+    }
     function paintPlayhead(t) {
       const d = mediaDuration();
       timeEl.textContent = fmtTime(t) + " / " + fmtTime(d);
@@ -463,7 +575,8 @@
       }
     }
     function updateProgress() {
-      const t = scrubTime != null ? scrubTime : (video.currentTime || 0);
+      const t = clockTime();
+      lastClock = t;
       paintPlayhead(t);
       const d = mediaDuration();
       if (d > 0 && video.buffered.length) {
@@ -479,11 +592,24 @@
       if (!(d > 0)) return;
       scrubTime = Math.max(0, Math.min(d, t));
       paintPlayhead(scrubTime);
+      beginAudioGate();
+      if (tsCtl && tsCtl.seek) {
+        if (scrubTime > 0.05) switchHold = scrubTime;
+        tsCtl.seek(scrubTime);
+        return;
+      }
       video.currentTime = scrubTime;
+    }
+    function releaseHold() {
+      if (switchHold == null) return;
+      const t = video.currentTime || 0;
+      if (t > 0.2 && t >= switchHold - 0.85) switchHold = null;
     }
     function clearScrub() {
       if (scrubTime == null) return;
       if (video.seeking) return;
+      if (switchHold != null) return;
+      if (Math.abs((video.currentTime || 0) - scrubTime) > 1.2) return;
       scrubTime = null;
       updateProgress();
     }
@@ -645,7 +771,7 @@
     }
     function seekBy(delta) {
       if (!(mediaDuration() > 0)) return;
-      const from = scrubTime != null ? scrubTime : (video.currentTime || 0);
+      const from = clockTime();
       jumpTo(from + delta);
     }
     function seekPct(p) {
@@ -669,10 +795,63 @@
         hls.startLoad();
         return;
       }
+      if (tsCtl) { tsCtl.destroy(); tsCtl = null; }
       if (hls) { hls.destroy(); hls = null; }
       video.removeAttribute("src");
       video.load();
       attachedUrl = src;
+      slog("attach", src);
+      if (!liveMode && src.indexOf("/hevc/") >= 0 && w.mtTsFmp4 && w.MediaSource) {
+        slog("path", "ts-fmp4 hevc");
+        const headers = {};
+        const tok = w.mtAuth && w.mtAuth.getToken && w.mtAuth.getToken();
+        if (tok) headers.Authorization = "Bearer " + tok;
+        tsCtl = w.mtTsFmp4.play({
+          video: video,
+          src: src,
+          headers: headers,
+          height: prefs.quality === "auto" ? 0 : Number(prefs.quality),
+          onDuration: function (d) {
+            if (d > 1) {
+              vodDuration = d;
+              updateProgress();
+            }
+          },
+          onLevels: function () {
+            applyStartAt();
+            refreshMenus();
+            if (wantPlay) video.play().catch(function () {});
+          },
+          onHeight: function (h) {
+            autoHeight = h || 0;
+            if (!moreMenu.hidden) renderMoreMenu();
+          },
+          onAudioGate: function (on) {
+            if (on) beginAudioGate();
+            else endAudioGate();
+          },
+          onError: function (e) {
+            slog("ts-fmp4 error", e && (e.message || e), video.error && (video.error.message || video.error.code));
+            const avc = src.replace(/\/hevc\//, "/avc/");
+            if (avc !== src && !hevcFallbackTried) {
+              hevcFallbackTried = true;
+              renditions = renditions.filter(function (r) {
+                return r && String(r.playlistUrl || "").indexOf("/avc/") >= 0;
+              });
+              autoHeight = 0;
+              attach(avc);
+              return;
+            }
+            setErr("播放失败");
+          }
+        });
+        const rawSetH = tsCtl.setHeight;
+        tsCtl.setHeight = function (h) {
+          holdClock();
+          return rawSetH.call(this, h);
+        };
+        return;
+      }
       if (canHlsJs()) {
         const extra = streamingOpts(liveMode);
         if (!liveMode && src.indexOf("/v1/live/") >= 0) {
@@ -682,11 +861,12 @@
         }
         hls = new Hls(hlsOpts(extra));
         hls.on(Hls.Events.MANIFEST_PARSED, function () {
+          slog("hls manifest", (hls.levels || []).map(function (l) { return l.height; }).join(","));
           applyQuality();
           applyStartAt();
           refreshMenus();
           updateProgress();
-          if (wantPlay) video.play().catch(function () {});
+          video.play().catch(function () {});
         });
         hls.on(Hls.Events.LEVEL_SWITCHED, function (_, data) {
           const lvl = hls.levels[data.level];
@@ -697,18 +877,39 @@
           if (typeof onHlsError === "function" && onHlsError(data)) return;
           if (!data || !data.fatal) return;
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-          else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
-          else setErr("播放失败");
+          else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            const avc = src.replace(/\/hevc\//, "/avc/");
+            if (avc !== src && !hevcFallbackTried) {
+              hevcFallbackTried = true;
+              renditions = renditions.filter(function (r) {
+                return r && String(r.playlistUrl || "").indexOf("/avc/") >= 0;
+              });
+              autoHeight = 0;
+              attach(avc);
+              return;
+            }
+            hls.recoverMediaError();
+          } else setErr("播放失败");
         });
         hls.loadSource(src);
         hls.attachMedia(video);
         return;
       }
-      if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = src;
-        return;
-      }
-      throw new Error("当前浏览器不支持 HLS");
+      slog("path", "wait hls.js");
+      ensureHlsJs(function (ok) {
+        if (attachedUrl !== src) return;
+        if (ok) {
+          attach(src);
+          return;
+        }
+        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          slog("path", "native hls");
+          video.src = src;
+          return;
+        }
+        setErr("当前浏览器不支持 HLS（hls.js 未加载）");
+      });
+      return;
     }
 
     renderSpeedMenu();
@@ -833,23 +1034,38 @@
     on(video, "play", setPlayingUi);
     on(video, "pause", setPlayingUi);
     on(video, "timeupdate", function () {
+      releaseHold();
       updateProgress();
       snapSpeedIfLive();
+      endAudioGate();
     });
     on(video, "progress", updateProgress);
     on(video, "durationchange", updateProgress);
-    on(video, "seeked", clearScrub);
+    on(video, "seeked", function () {
+      releaseHold();
+      clearScrub();
+      endAudioGate();
+    });
     on(video, "playing", function () {
+      releaseHold();
       if (!video.seeking) clearScrub();
+      endAudioGate();
     });
     on(video, "loadedmetadata", function () {
+      if ((!metaW || !metaH) && video.videoWidth && video.videoHeight && switchHold == null) {
+        metaW = video.videoWidth;
+        metaH = video.videoHeight;
+      }
       applyAspect();
       applySpeed();
-      applyStartAt();
+      if (switchHold == null) applyStartAt();
       updateProgress();
-      if (wantPlay) video.play().catch(function () {});
+      if (wantPlay && switchHold == null) video.play().catch(function () {});
     });
-    on(video, "volumechange", setMuteUi);
+    on(video, "volumechange", function () {
+      if (audioGate) return;
+      setMuteUi();
+    });
     on(root, "mousemove", function () {
       if (Date.now() - recentTouch < 800) return;
       pingIdle();
@@ -929,6 +1145,8 @@
       load: function (opts) {
         opts = opts || {};
         setErr("");
+        hevcFallbackTried = false;
+        vodDuration = Number(opts.duration) > 0 ? Number(opts.duration) : 0;
         renditions = opts.renditions || [];
         metaW = opts.width || 0;
         metaH = opts.height || 0;
@@ -959,9 +1177,11 @@
       destroy: function () {
         clearTimeout(idleTimer);
         clearTimeout(tapTimer);
+        clearTimeout(audioGateTimer);
         stopLiveTick();
         closeMenus();
         listeners.forEach(function (off) { off(); });
+        if (tsCtl) { tsCtl.destroy(); tsCtl = null; }
         if (hls) { hls.destroy(); hls = null; }
         if (audioCtx) audioCtx.close().catch(function () {});
         root.innerHTML = "";

@@ -162,7 +162,7 @@
       }
       if (rungs.length) {
         const i = Math.max(0, Math.min(rungs.length - 1, tc.index || 0));
-        tcMeta.textContent = Math.round(pct) + "% · " + rungs[i] + "p";
+        tcMeta.textContent = Math.round(pct) + "% · " + rungs[i];
       } else {
         tcMeta.textContent = Math.round(pct) + "%";
       }
@@ -335,7 +335,7 @@
         if (v.status === "failed") throw new Error(v.errorMessage || "转码失败");
         const rungs = (v.transcode && v.transcode.rungs) || [];
         const i = v.transcode && v.transcode.index;
-        statusEl.textContent = rungs[i] ? ("正在转码 " + rungs[i] + "p…") : "正在转码…";
+        statusEl.textContent = rungs[i] ? ("正在转码 " + rungs[i] + "…") : "正在转码…";
         await new Promise(r => setTimeout(r, 5000));
       }
     }

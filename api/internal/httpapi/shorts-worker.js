@@ -15715,9 +15715,11 @@ async function startPipe(p) {
   const vtrack = await p.input.getPrimaryVideoTrack();
   if (!vtrack) throw new Error("no video track");
   const vcfg = await vtrack.getDecoderConfig();
-  if (codecKind(vcfg && vcfg.codec) !== "avc") {
-    throw new Error("first version only supports H.264");
+  const kind = codecKind(vcfg && vcfg.codec);
+  if (kind !== "avc" && kind !== "hevc") {
+    throw new Error("unsupported video codec " + ((vcfg && vcfg.codec) || kind));
   }
+  self.postMessage({ type: "log", id: p.id, tag: "vcodec", message: String((vcfg && vcfg.codec) || kind) });
   let vcfgUse = Object.assign({}, vcfg, { optimizeForLatency: true });
   if (port) {
     const cfg = cloneConfig(vcfgUse);

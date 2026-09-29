@@ -32,7 +32,7 @@ flowchart TB
 - API：**Go**（[`api/`](../api/)）；以 [`openapi.yaml`](openapi.yaml) 为准
 - 数据：PostgreSQL（[`schema.sql`](schema.sql) + `api/internal/db/*.sql` 迁移）。视频对外 id 为 10 位字母数字，见领域模型「ID 与时间」。Redis（会话、热计数、Feed 缓存）
 - 存储：S3 兼容（AWS S3 或 MinIO）
-- 点播：直传 → 队列 → FFmpeg 多档 HLS + 音轨 + VTT + 封面
+- 点播：直传 → 队列 → FFmpeg 多档 **MPEG-TS** HLS + 音轨 + VTT + 封面（网页 HEVC 播放见 [`longform-hls.md`](longform-hls.md)）
 - 直播：独立 Origin（SRS）；推流 RTMP；播放 HLS（EVENT 全量清单，关播补 `EXT-X-ENDLIST`）
 - 搜索：先 Postgres / Meilisearch（Phase 6）
 

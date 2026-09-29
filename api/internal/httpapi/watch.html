@@ -6,9 +6,10 @@
   <title>MiniTube</title>
   <link rel="stylesheet" href="/static/account.css"/>
   <link rel="stylesheet" href="/static/player.css"/>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js"></script>
   <script src="/static/token.js"></script>
   <script src="/static/media-edge.js"></script>
+  <script src="/static/client-cap.js"></script>
+  <script src="/static/ts-fmp4.js"></script>
   <script src="/static/player.js"></script>
   <style>
     :root { color-scheme: dark; }
@@ -38,6 +39,9 @@
     const VIDEO_ID = "__VIDEO_ID__";
     const API = location.origin;
     const errEl = document.getElementById("err");
+    function slog() {
+      try { console.log.apply(console, ["[mt-watch]"].concat([].slice.call(arguments))); } catch (e) {}
+    }
     function token() { return window.mtAuth && window.mtAuth.getToken(); }
     function headers() {
       const h = {};
@@ -52,25 +56,32 @@
     }
 
     async function main() {
+      slog("boot", VIDEO_ID);
       if (window.mtMedia && window.mtMedia.ready) await window.mtMedia.ready();
       const meta = await getJSON("/v1/videos/" + VIDEO_ID);
+      slog("meta", meta.status, meta.width + "x" + meta.height);
       if (meta.kind === "short") { location.replace("/shorts/" + VIDEO_ID); return; }
       document.getElementById("title").textContent = meta.title || "未命名";
       document.title = (meta.title || "MiniTube") + " · MiniTube";
       document.getElementById("meta").textContent =
         (meta.channel && meta.channel.name ? meta.channel.name : "") +
         (meta.durationMs ? " · " + Math.round(meta.durationMs / 1000) + "s" : "");
-      const pb = await getJSON("/v1/videos/" + VIDEO_ID + "/playback");
+      const pb = window.mtClientCap
+        ? await window.mtClientCap.fetchPlayback(API, VIDEO_ID, headers(), { page: "watch" })
+        : await getJSON("/v1/videos/" + VIDEO_ID + "/playback");
+      slog("playback", pb.codec, pb.masterPlaylistUrl, "hw", (pb.client && pb.client.hwCodecs) || []);
       const player = window.mtPlayer.mount(document.getElementById("player"));
       player.load({
         src: pb.masterPlaylistUrl,
         poster: meta.thumbnailUrl || "",
         renditions: pb.renditions || [],
+        autoplay: true,
+        duration: meta.durationMs ? meta.durationMs / 1000 : 0,
         width: meta.width || 0,
-        height: meta.height || 0
+        height: meta.height || 0,
       });
     }
-    main().catch(e => { errEl.textContent = e.message; });
+    main().catch(e => { slog("fail", e && e.message); errEl.textContent = e.message; });
   </script>
   <script src="/static/account.js"></script>
 </body>

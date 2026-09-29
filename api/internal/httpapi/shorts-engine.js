@@ -1204,6 +1204,7 @@ export async function create(opts) {
       return;
     }
     if (msg.type === "log") {
+      slog(msg.tag || "w", "id=" + msg.id, msg.message);
       return;
     }
     if (msg.type === "pktq") {
@@ -1344,7 +1345,8 @@ export async function create(opts) {
       listen: activeId,
       warm: warmId,
       warms: warmIds.slice(),
-      prev: prevId
+      prev: prevId,
+      preferHardware: true
     }, [ch.port2]);
     demux.postMessage({
       type: "open",

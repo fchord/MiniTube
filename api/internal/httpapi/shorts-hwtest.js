@@ -356,7 +356,8 @@ export function create(opts) {
       warm: null,
       prev: null,
       dropAudio: true,
-      rawFrames: true
+      rawFrames: true,
+      preferHardware: true
     }, [ch.port2]);
     demux.postMessage({
       type: "open",

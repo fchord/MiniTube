@@ -4,6 +4,7 @@
 
 | 文档 | 内容 |
 | --- | --- |
+| [longform-hls.md](longform-hls.md) | 长视频：磁盘 MPEG-TS、网页 TS→fMP4/MSE、PES/NAL、HEVC `CODECS` |
 | [shorts-playback.md](shorts-playback.md) | 短视频滑动队列、1+1+3 硬解窗口、静音/点击约定、硬解测试页 |
 | [shorts-slide.md](shorts-slide.md) | 竖滑过渡：\(e(p)\)、试过的曲线、当前五次+六次、未做回弹 |
 | [shorts-av-sync.md](shorts-av-sync.md) | 墙钟 AV 同步：单钟、音频基准、TryToMatch / LostMatch |

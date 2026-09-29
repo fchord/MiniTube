@@ -487,6 +487,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+    post:
+      tags: [Videos]
+      security: []
+      summary: 同上，请求体附带客户端 OS/浏览器/硬解能力（写入 playback_client_reports）
+      operationId: postPlayback
+      parameters:
+        - $ref: "#/components/parameters/VideoId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaybackClientRequest"
+      responses:
+        "200":
+          description: 播放清单，并回显 client
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Playback"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: 尚未 ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /videos/{videoId}/progress:
     put:
@@ -1560,6 +1588,41 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SubtitleTrack"
+        client:
+          description: POST 时回显的客户端能力
+          type: object
+          additionalProperties: true
+
+    PlaybackClientRequest:
+      type: object
+      required: [client]
+      properties:
+        client:
+          type: object
+          additionalProperties: true
+          properties:
+            page:
+              type: string
+              description: watch / shorts / shorts-hwtest
+            os:
+              type: string
+            osVersion:
+              type: string
+            browser:
+              type: string
+            browserVersion:
+              type: string
+            hwCodecs:
+              type: array
+              items:
+                type: string
+            ua:
+              type: string
+            codecs:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
 
     Rendition:
       type: object
