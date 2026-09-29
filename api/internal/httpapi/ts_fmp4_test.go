@@ -29,6 +29,7 @@ func TestTsFmp4Asset(t *testing.T) {
 		"stale",
 		"timestampOffset",
 		"hevc 10bit",
+		"tsOffApplied",
 		"segStartAt",
 		"freezeFrame",
 		"height <= want",

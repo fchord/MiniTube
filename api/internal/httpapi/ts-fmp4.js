@@ -667,7 +667,9 @@
       }
     }
     const v0 = samplesIn[0].dts != null ? samplesIn[0].dts : samplesIn[0].pts;
-    st.base = (aFrames.length && aFrames[0].pts < v0) ? aFrames[0].pts : v0;
+    if (st.base == null) {
+      st.base = (aFrames.length && aFrames[0].pts < v0) ? aFrames[0].pts : v0;
+    }
     const vSamples = [];
     const mdatParts = [];
     let keys = 0;
@@ -1007,8 +1009,10 @@
           }
           if (cur.init) { slog("init", cur.init.length); await appendTo(sb, cur.init, gen); }
           if (stale(gen)) return;
-          if (sb) {
+          if (!st.tsOffApplied && sb) {
             try { sb.timestampOffset = segEpoch; } catch (e) {}
+            st.tsOffApplied = true;
+            slog("ts offset", segEpoch);
           }
           if (vodDur > 0 && ms && ms.readyState === "open" && !st.durSet) {
             try { ms.duration = vodDur; st.durSet = true; slog("mse duration", vodDur); } catch (e) { slog("mse duration", e && e.message); }
